@@ -1,0 +1,1247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>AI Task Monitor — Auto Task Assignment (Offline)</title>
+<style>
+  :root{
+    --bg:#0b0f14; --panel:#11161d; --panel-2:#151b23; --border:#232b35;
+    --accent:#3ecfd6; --person:#5b8cff; --target:#3ddc84; --object:#f4c542; --red:#ff5b5b;
+    --text:#e8edf2; --muted:#8493a3;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:var(--bg); color:var(--text);
+    font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    height:100vh; display:flex; flex-direction:column;
+  }
+  header{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:12px 20px; background:var(--panel); border-bottom:1px solid var(--border);
+  }
+  header .title{display:flex; align-items:center; gap:10px; font-weight:600; font-size:16px;}
+  header .dot{width:9px;height:9px;border-radius:50%;background:var(--target); box-shadow:0 0 8px var(--target);}
+  header .status{font-size:12px; color:var(--muted);}
+  header .nav-links{display:flex; gap:12px; align-items:center;}
+  header .nav-link{
+    color:var(--accent); text-decoration:none; font-size:12px; font-weight:500;
+    padding:5px 12px; border:1px solid var(--border); border-radius:6px; background:var(--panel-2);
+    transition: all 0.2s ease; display:inline-flex; align-items:center; gap:6px;
+  }
+  header .nav-link:hover{border-color:var(--accent); background:rgba(62,207,214,0.12);}
+  main{flex:1; display:grid; grid-template-columns:2fr 1fr; gap:14px; padding:14px; min-height:0;}
+  .panel{background:var(--panel); border:1px solid var(--border); border-radius:10px; display:flex; flex-direction:column; min-height:0;}
+  .cam-panel{position:relative; overflow:hidden;}
+  .cam-header{padding:10px 14px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center;}
+  .cam-header h2{font-size:13px; margin:0; font-weight:600; color:var(--muted); letter-spacing:.04em; text-transform:uppercase;}
+  .cam-stage{position:relative; flex:1; background:#000; display:flex; align-items:center; justify-content:center;}
+  video, canvas{position:absolute; top:0; left:0; width:100%; height:100%; object-fit:contain;}
+  video{transform:scaleX(-1);}
+  canvas{transform:scaleX(-1); pointer-events:none;}
+  .placeholder{color:var(--muted); font-size:13px; z-index:2; text-align:center; padding:0 20px;}
+  .controls{display:flex; gap:8px; padding:10px 14px; border-top:1px solid var(--border); flex-wrap:wrap; align-items:center;}
+  button{
+    background:var(--panel-2); color:var(--text); border:1px solid var(--border);
+    padding:8px 14px; border-radius:6px; cursor:pointer; font-size:12px; font-weight:500;
+  }
+  button:hover{border-color:var(--accent);}
+  button.primary{background:var(--accent); color:#04161a; border:none;}
+  button.danger{background:var(--red); color:#210; border:none;}
+  button:disabled{opacity:.4; cursor:not-allowed;}
+  .legend{display:flex; gap:14px; font-size:11px; color:var(--muted); align-items:center; margin-left:auto;}
+  .legend span{display:flex; align-items:center; gap:5px;}
+  .swatch{width:10px;height:10px;border-radius:2px;display:inline-block;}
+
+  .side{display:flex; flex-direction:column; gap:14px; min-height:0;}
+  .task-panel{padding:14px;}
+  .task-panel h2{font-size:13px; margin:0 0 10px; font-weight:600; color:var(--muted); letter-spacing:.04em; text-transform:uppercase;}
+  .task-name{font-size:20px; font-weight:700; color:var(--target); margin-bottom:6px;}
+  .task-instruction{font-size:12.5px; color:var(--text); opacity:.85; margin-bottom:10px; line-height:1.4;}
+  .state-pill{display:inline-block; padding:4px 10px; border-radius:20px; font-size:12px; font-weight:700; letter-spacing:.03em;}
+  .state-idle{background:rgba(132,147,163,.15); color:var(--muted);}
+  .state-waiting{background:rgba(91,140,255,.15); color:var(--person);}
+  .state-holding{background:rgba(244,197,66,.15); color:var(--object);}
+  .state-completed{background:rgba(61,220,132,.15); color:var(--target);}
+  .stat-row{display:flex; justify-content:space-between; padding:7px 0; font-size:12.5px; border-bottom:1px solid var(--border);}
+  .stat-row:last-child{border-bottom:none;}
+  .stat-row .v{font-weight:600;}
+  .tracking-panel{padding:14px;}
+  .tracking-panel h2{font-size:13px; margin:0 0 10px; color:var(--muted); letter-spacing:.04em; text-transform:uppercase;}
+  .tracking-meta{display:grid; grid-template-columns:1fr 1fr; gap:6px 14px; font-size:12px;}
+  .tracking-meta b{color:var(--text);}
+  .target-sequence{display:grid; gap:5px; margin-top:10px;}
+  .target-step{display:flex; align-items:center; gap:8px; font-size:11px; color:var(--muted);}
+  .target-step.current{color:var(--text); font-weight:700;}
+  .target-step.done{color:var(--target);}
+  .target-chip{width:13px; height:13px; border-radius:2px; display:inline-block; flex:0 0 auto;}
+
+  .banner{margin:0 14px 14px; padding:12px 14px; border-radius:8px; display:none; flex-direction:column; gap:4px;}
+  .banner.show{display:flex;}
+  .banner.alert{background:rgba(255,91,91,.12); border:1px solid var(--red);}
+  .banner.correct{background:rgba(61,220,132,.12); border:1px solid var(--target);}
+  .banner .b-title{font-weight:700; font-size:13px;}
+  .banner.alert .b-title{color:var(--red);}
+  .banner.correct .b-title{color:var(--target);}
+  .banner .b-detail{font-size:12px; color:var(--text); opacity:.85;}
+
+  .log-panel{flex:1; min-height:0; display:flex; flex-direction:column;}
+  .log-header{padding:10px 14px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center;}
+  .log-header h2{font-size:13px; margin:0; font-weight:600; color:var(--muted); letter-spacing:.04em; text-transform:uppercase;}
+  .log-header button{padding:4px 10px; font-size:11px;}
+  .log-list{flex:1; overflow-y:auto; padding:8px 10px; font-family:'SF Mono',Consolas,monospace; font-size:11.5px;}
+  .log-entry{padding:5px 8px; border-radius:4px; margin-bottom:3px; display:flex; gap:8px; border-left:2px solid var(--border);}
+  .log-entry .t{color:var(--muted); flex-shrink:0;}
+  .log-entry.ok{border-left-color:var(--target);}
+  .log-entry.alert{border-left-color:var(--red); background:rgba(255,91,91,.08);}
+  .log-entry.info{border-left-color:var(--person);}
+
+  footer{
+    padding:9px 20px; background:var(--panel); border-top:1px solid var(--border);
+    display:flex; justify-content:space-between; font-size:11.5px; color:var(--muted);
+  }
+  footer .storage{display:flex; align-items:center; gap:6px;}
+  footer .storage .dot{width:7px;height:7px;border-radius:50%;background:var(--target);}
+
+  /* Presentation layer: keeps the existing DOM and runtime hooks intact. */
+  :root{
+    --bg:#071015;
+    --panel:#0d1a21;
+    --panel-2:#11242d;
+    --border:rgba(143,210,216,.16);
+    --border-strong:rgba(143,210,216,.3);
+    --accent:#63e6d8;
+    --accent-soft:rgba(99,230,216,.12);
+    --text:#effcf9;
+    --muted:#8da8ad;
+    --shadow:0 22px 55px rgba(0,0,0,.32);
+    --font-sans:"Segoe UI Variable", "Aptos", "Trebuchet MS", sans-serif;
+    --font-mono:"Cascadia Code", "SFMono-Regular", Consolas, monospace;
+  }
+
+  body{
+    background:
+      radial-gradient(circle at 10% 0%, rgba(43,126,137,.2), transparent 30%),
+      radial-gradient(circle at 100% 100%, rgba(194,145,66,.08), transparent 28%),
+      linear-gradient(135deg,#071015 0%,#09151b 52%,#0c1719 100%);
+    font-family:var(--font-sans);
+    letter-spacing:.01em;
+  }
+
+  body::before{
+    content:"";
+    position:fixed;
+    inset:0;
+    pointer-events:none;
+    opacity:.24;
+    background-image:linear-gradient(rgba(255,255,255,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.025) 1px,transparent 1px);
+    background-size:42px 42px;
+    mask-image:linear-gradient(to bottom,black,transparent 86%);
+  }
+
+  header{
+    position:relative;
+    z-index:1;
+    margin:16px 18px 0;
+    padding:16px 22px;
+    background:rgba(13,26,33,.84);
+    border:1px solid var(--border);
+    border-radius:14px;
+    box-shadow:var(--shadow), inset 0 1px rgba(255,255,255,.05);
+    backdrop-filter:blur(18px);
+  }
+
+  header .title{font-size:15px;letter-spacing:.1em;text-transform:uppercase;}
+  header .title .dot{width:8px;height:8px;box-shadow:0 0 0 5px rgba(61,220,132,.08),0 0 18px var(--target);}
+  header .nav-links{gap:18px;}
+  header .nav-link{padding:8px 13px;border-color:var(--border);border-radius:8px;background:rgba(99,230,216,.05);}
+  header .nav-link:hover{border-color:var(--accent);background:var(--accent-soft);transform:translateY(-1px);}
+  header .status{letter-spacing:.06em;text-transform:uppercase;}
+
+  main{
+    position:relative;
+    z-index:1;
+    width:100%;
+    max-width:1720px;
+    margin:0 auto;
+    padding:18px;
+    gap:18px;
+    grid-template-columns:minmax(0,1.65fr) minmax(330px,.85fr);
+  }
+
+  .panel{
+    background:linear-gradient(145deg,rgba(17,36,45,.93),rgba(9,22,29,.9));
+    border:1px solid var(--border);
+    border-radius:14px;
+    box-shadow:var(--shadow),inset 0 1px rgba(255,255,255,.04);
+    overflow:hidden;
+  }
+  .cam-panel{min-height:0;}
+  .cam-header,.log-header{padding:14px 17px;border-bottom:1px solid var(--border);}
+  .cam-header h2,.task-panel h2,.tracking-panel h2,.log-header h2{color:#b9d6d5;font-size:11px;letter-spacing:.14em;}
+  .cam-header h2::before,.task-panel h2::before,.tracking-panel h2::before,.log-header h2::before{content:"";display:inline-block;width:5px;height:5px;margin:0 8px 2px 0;border-radius:50%;background:var(--accent);box-shadow:0 0 10px var(--accent);}
+  .cam-stage{margin:14px;border:1px solid var(--border);border-radius:10px;background:#02080a;box-shadow:inset 0 0 45px rgba(0,0,0,.65);}
+  .cam-stage::after{content:"";position:absolute;inset:0;pointer-events:none;background:linear-gradient(115deg,transparent 0 48%,rgba(99,230,216,.06) 50%,transparent 52%);opacity:.7;}
+  .placeholder{max-width:580px;color:#9cb9bb;line-height:1.65;letter-spacing:.02em;}
+  .placeholder code{color:var(--accent);background:rgba(99,230,216,.08);padding:2px 5px;border-radius:4px;}
+  .controls{padding:14px 17px;border-top:1px solid var(--border);gap:9px;}
+  button{padding:9px 14px;border-radius:7px;border-color:var(--border-strong);background:rgba(255,255,255,.04);transition:transform .18s ease,border-color .18s ease,background .18s ease;}
+  button:hover{border-color:var(--accent);background:var(--accent-soft);transform:translateY(-1px);}
+  button.primary{background:var(--accent);color:#062026;box-shadow:0 8px 22px rgba(99,230,216,.18);}
+  button.danger{background:rgba(255,91,91,.14);color:#ff9c9c;border:1px solid rgba(255,91,91,.4);}
+  button:focus-visible,.nav-link:focus-visible{outline:2px solid var(--accent);outline-offset:3px;}
+  .legend{gap:12px;}
+  .swatch{box-shadow:0 0 8px currentColor;}
+
+  .side{gap:18px;}
+  .task-panel,.tracking-panel{padding:18px;}
+  .task-name{margin:12px 0 8px;color:var(--accent);font-size:25px;letter-spacing:-.02em;}
+  .task-instruction{max-width:34rem;color:#b8cbcb;line-height:1.55;}
+  .stat-row{padding:10px 0;border-color:var(--border);}
+  .state-pill{padding:5px 10px;border-radius:5px;letter-spacing:.1em;font-size:10px;}
+  .tracking-meta{gap:9px 14px;padding-top:4px;}
+  .tracking-meta span{color:var(--muted);}
+  .tracking-meta b{font-family:var(--font-mono);font-size:11px;color:#e2f2ef;text-align:right;}
+  .target-sequence{gap:7px;margin-top:16px;}
+  .target-step{padding:8px 10px;border:1px solid transparent;border-radius:7px;background:rgba(255,255,255,.025);}
+  .target-step.current{border-color:var(--border-strong);background:var(--accent-soft);}
+  .banner{margin:0;padding:14px 16px;border-radius:10px;box-shadow:var(--shadow);}
+  .log-panel{min-height:190px;}
+  .log-list{padding:12px 14px;}
+  .log-entry{padding:8px 10px;border-radius:6px;background:rgba(255,255,255,.025);line-height:1.4;}
+  .log-entry .t{color:#6f8f94;}
+
+  footer{
+    position:relative;
+    z-index:1;
+    margin:0 18px 14px;
+    padding:11px 16px;
+    background:rgba(9,22,29,.72);
+    border:1px solid var(--border);
+    border-radius:10px;
+    backdrop-filter:blur(12px);
+  }
+
+  @media (max-width:980px){
+    header{margin:10px 10px 0;}
+    header .nav-links{gap:10px;}
+    main{padding:10px;grid-template-columns:1fr;}
+    .cam-panel{min-height:65vh;}
+    .side{display:grid;grid-template-columns:1fr 1fr;align-items:stretch;}
+    .log-panel{grid-column:1 / -1;}
+    footer{margin:0 10px 10px;}
+  }
+
+  @media (max-width:620px){
+    header{align-items:flex-start;gap:14px;flex-direction:column;padding:14px 16px;}
+    header .nav-links{width:100%;justify-content:space-between;}
+    header .nav-link{font-size:11px;}
+    main{gap:12px;}
+    .cam-header{align-items:flex-start;gap:10px;flex-wrap:wrap;}
+    .legend{order:3;width:100%;flex-wrap:wrap;}
+    .cam-stage{margin:10px;min-height:48vh;}
+    .side{display:flex;gap:12px;}
+    .task-name{font-size:22px;}
+    footer{flex-direction:column;gap:7px;line-height:1.45;}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="title"><span class="dot"></span> AI TASK MONITOR — Auto Task Assignment</div>
+  <div class="nav-links">
+    <a href="/" class="nav-link">🛰 Mission Control Dashboard</a>
+    <span class="status" id="modelStatus">Loading models…</span>
+  </div>
+</header>
+
+<main>
+  <div class="panel cam-panel">
+    <div class="cam-header">
+      <h2>Live Camera</h2>
+      <div class="legend">
+        <span><span class="swatch" style="background:#5b8cff"></span> Body pose</span>
+        <span><span class="swatch" style="background:#29d9ff"></span> Hands</span>
+        <span><span class="swatch" style="background:#3ddc84"></span> Task object</span>
+        <span><span class="swatch" style="background:#f4c542"></span> Other objects</span>
+      </div>
+      <span class="status" id="fpsLabel" style="margin-left:14px;">-- fps</span>
+    </div>
+    <div class="cam-stage" id="stage">
+      <div class="placeholder" id="placeholder">Click "Start Camera" to begin.<br/>Show a bottle, cup, phone, book, remote, banana, apple, or ball — a task will be assigned automatically.<br/>Body pose (33-point) and hand tracking (21-point/hand) run on-device via MediaPipe — face is intentionally not tracked.<br/>Nothing leaves your machine.<br/><br/><b style="color:#f4c542">Note:</b> if opened directly as a file, the browser will block the camera. Serve it via <code>python3 -m http.server</code> or Flask dashboard and open <code>http://localhost:8554/task-monitor</code> instead.</div>
+      <video id="video" autoplay muted playsinline></video>
+      <canvas id="overlay"></canvas>
+    </div>
+    <div class="controls">
+      <button class="primary" id="startBtn" disabled>Start Camera</button>
+      <button class="danger" id="stopBtn" disabled>Stop</button>
+      <button id="resetBtn">Skip / New Task</button>
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);margin-left:6px;">
+        <input type="checkbox" id="voiceToggle" checked/> 🔊 Voice feedback
+      </label>
+    </div>
+  </div>
+
+  <div class="side">
+    <div class="panel task-panel">
+      <h2>Current Task</h2>
+      <div class="task-name" id="taskName">Waiting for an object…</div>
+      <div class="task-instruction" id="taskInstruction">Show one of the supported objects to the camera and a task will be assigned automatically.</div>
+      <div class="stat-row"><span>State</span><span id="statePill" class="state-pill state-idle">IDLE</span></div>
+      <div class="stat-row"><span>Camera</span><span class="v" id="statCam" style="color:var(--muted)">Offline</span></div>
+      <div class="stat-row"><span>People in frame</span><span class="v" id="statPersonCount">0</span></div>
+    </div>
+    <div class="panel tracking-panel">
+      <h2>Object Route</h2>
+      <div class="tracking-meta">
+        <span>Object</span><b id="trackedObject">Waiting</b>
+        <span>Track ID</span><b id="trackedObjectId">--</b>
+        <span>Step</span><b id="trackedStep">0 / 4</b>
+        <span>Status</span><b id="trackingStatus">Waiting for object</b>
+      </div>
+      <div class="target-sequence" id="targetSequence"></div>
+    </div>
+
+    <div id="alertBanner" class="banner alert">
+      <div class="b-title" id="alertTitle">🚨 PROCEDURE VIOLATION</div>
+      <div class="b-detail" id="alertDetail"></div>
+    </div>
+    <div id="correctBanner" class="banner correct">
+      <div class="b-title" id="correctTitle">🟢 CORRECT ACTION</div>
+      <div class="b-detail" id="correctDetail"></div>
+    </div>
+
+    <div class="panel log-panel">
+      <div class="log-header">
+        <h2>Event Log — Local Storage</h2>
+        <div>
+          <button id="exportBtn">Export</button>
+          <button id="clearBtn">Clear</button>
+        </div>
+      </div>
+      <div class="log-list" id="logList"></div>
+    </div>
+  </div>
+</main>
+
+<footer>
+  <div class="storage"><span class="dot"></span> Local Storage Active — logs persist across reloads, no server, no internet after first load</div>
+  <div id="clock"></div>
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js"></script>
+
+<script type="module">
+import { PoseLandmarker, HandLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
+
+// ----------------------------------------------------------------------
+// CONFIG
+// ----------------------------------------------------------------------
+// Labels are deliberately generic ("<object> Detected") rather than
+// activity names ("Drink Water", "Check Your Phone") — the panel should
+// just report what was seen, not invent a scripted activity for it.
+const GENERIC_INSTRUCTION = 'Complete the given task — move the object through all four targets in order.';
+const TASKS = {
+  'bottle':      {label:'Water Bottle Detected', instruction:GENERIC_INSTRUCTION},
+  'hand':        {label:'Hand Detected',         instruction:'Complete the given task — move your hand through all four targets in order.'},
+  'cup':         {label:'Cup Detected',          instruction:GENERIC_INSTRUCTION},
+  'cell phone':  {label:'Phone Detected',        instruction:GENERIC_INSTRUCTION},
+  'book':        {label:'Book Detected',         instruction:GENERIC_INSTRUCTION},
+  'remote':      {label:'Remote Detected',       instruction:GENERIC_INSTRUCTION},
+  'banana':      {label:'Banana Detected',       instruction:GENERIC_INSTRUCTION},
+  'apple':       {label:'Apple Detected',        instruction:GENERIC_INSTRUCTION},
+  'sports ball': {label:'Ball Detected',         instruction:GENERIC_INSTRUCTION}
+};
+const PERSON_COLOR = '#5b8cff';
+const HAND_COLOR = '#29d9ff';
+const TARGET_COLOR = '#3ddc84';
+const OBJECT_COLOR = '#f4c542';
+
+const OBJECT_MIN_SCORE = 0.55;        // filter out low-confidence coco-ssd detections
+const KEYPOINT_MIN_SCORE = 0.4;       // pose landmark visibility threshold
+const HAND_MIN_SCORE = 0.5;           // hand detection (handedness) confidence threshold
+const KEYPOINT_SMOOTHING = 0.5;       // 0 = no smoothing, higher = smoother but more lag (EMA factor)
+const OCCLUSION_GRACE_MS = 1500;      // how long we keep "remembering" an object's last position while hidden
+const WRONG_TARGET_COOLDOWN_MS = 4000;// re-arm delay for the (silent, visual-only) off-route banner
+const NEXT_TASK_DELAY_MS = 3000;      // pause after a route fully completes before a new one can start
+const LOG_KEY = 'ai_task_monitor_log_v1';
+const PERSON_CONFIRM_FRAMES = 4;
+const TARGET_COLORS = ['#3ddc84', '#f4c542', '#ff5b5b', '#5b8cff'];
+const TARGET_NAMES = ['GREEN', 'YELLOW', 'RED', 'BLUE'];
+const TARGET_WORDS = ['one', 'two', 'three', 'four'];
+const TRACK_MAX_MISSED = 12;
+const TRACK_MATCH_DISTANCE = 180;
+const TARGET_DWELL_MS = 2000;         // object must sit in the target for 2 seconds to confirm the step
+const TARGET_OVERLAP_RATIO = 0.5;     // "majority" overlap between object box and target box counts as "at target",
+                                       // regardless of whether the object sticks out past the target's edges
+const MOVEMENT_HISTORY_LIMIT = 500;
+const TRACKABLE_OBJECT_CLASSES = ['bottle', 'cell phone', 'book', 'cup', 'banana', 'apple', 'remote', 'sports ball'];
+const HAND_FALLBACK_DELAY_MS = 15000; // 15s continuous no-object detection before hand-tracking fallback
+let lastObjectSeenTime = Date.now();
+
+// Standard MediaPipe Hand Landmarker connections (21 points per hand, see docs/hand_landmarks reference)
+const HAND_CONNECTIONS = [
+  [0,1],[1,2],[2,3],[3,4],           // thumb
+  [0,5],[5,6],[6,7],[7,8],           // index
+  [5,9],[9,10],[10,11],[11,12],      // middle
+  [9,13],[13,14],[14,15],[15,16],    // ring
+  [13,17],[17,18],[18,19],[19,20],   // pinky
+  [0,17]                             // palm base
+];
+
+// ----------------------------------------------------------------------
+// TASK STATE MACHINE
+// ----------------------------------------------------------------------
+const T_IDLE = 'IDLE', T_WAITING = 'WAITING', T_HOLDING = 'HOLDING', T_COMPLETED = 'COMPLETED';
+let taskState = T_IDLE;
+let currentTaskClass = null;
+let lastWrongAlertAt = 0;
+let nextTaskResetTimer = null;
+
+// multi-person debounce tracking
+let personConfirmed = 0;
+let personCandidateValue = 0;
+let personCandidateFrames = 0;
+
+// object memory (survives brief occlusion, e.g. object hidden behind a hand)
+const objectMemory = {}; // class -> {bbox, lastSeen}
+
+// smoothed pose keypoints (EMA), for the primary tracked person — face is intentionally never estimated/smoothed
+let smoothedKeypoints = null;
+let trackedObject = null;
+let nextTrackId = 1;
+let routeTargets = [];
+let currentTargetIndex = -1;
+let targetDwellStartedAt = 0;
+let lastMovementStatus = 'Waiting for object';
+const movementHistory = [];
+
+// ----------------------------------------------------------------------
+// DOM
+// ----------------------------------------------------------------------
+const video = document.getElementById('video');
+const overlay = document.getElementById('overlay');
+const ctx = overlay.getContext('2d');
+const startBtn = document.getElementById('startBtn');
+const stopBtn = document.getElementById('stopBtn');
+const resetBtn = document.getElementById('resetBtn');
+const placeholder = document.getElementById('placeholder');
+const modelStatus = document.getElementById('modelStatus');
+const fpsLabel = document.getElementById('fpsLabel');
+const logList = document.getElementById('logList');
+const statCam = document.getElementById('statCam');
+const statePill = document.getElementById('statePill');
+const taskName = document.getElementById('taskName');
+const taskInstruction = document.getElementById('taskInstruction');
+const alertBanner = document.getElementById('alertBanner');
+const alertTitle = document.getElementById('alertTitle');
+const alertDetail = document.getElementById('alertDetail');
+const correctBanner = document.getElementById('correctBanner');
+const correctTitle = document.getElementById('correctTitle');
+const correctDetail = document.getElementById('correctDetail');
+const voiceToggle = document.getElementById('voiceToggle');
+const trackedObjectLabel = document.getElementById('trackedObject');
+const trackedObjectIdLabel = document.getElementById('trackedObjectId');
+const trackedStepLabel = document.getElementById('trackedStep');
+const trackingStatusLabel = document.getElementById('trackingStatus');
+const targetSequence = document.getElementById('targetSequence');
+
+let objectModel = null, poseLandmarker = null, handLandmarker = null, stream = null, running = false, rafId = null;
+
+// ----------------------------------------------------------------------
+// LOCAL LOG
+// ----------------------------------------------------------------------
+function nowStr(){
+  const d = new Date();
+  return d.toLocaleTimeString('en-GB', {hour12:false}) + '.' + String(d.getMilliseconds()).padStart(3,'0');
+}
+function loadLog(){ try{ return JSON.parse(localStorage.getItem(LOG_KEY) || '[]'); }catch(e){ return []; } }
+function saveLog(entries){ localStorage.setItem(LOG_KEY, JSON.stringify(entries.slice(-500))); }
+function renderLog(){
+  const entries = loadLog();
+  logList.innerHTML = entries.slice().reverse().map(e =>
+    `<div class="log-entry ${e.type}"><span class="t">${e.t}</span><span>${e.msg}</span></div>`
+  ).join('');
+}
+function addLog(type, msg){
+  const entries = loadLog();
+  entries.push({t: nowStr(), type, msg});
+  saveLog(entries);
+  renderLog();
+}
+renderLog();
+
+document.getElementById('clearBtn').onclick = () => { localStorage.removeItem(LOG_KEY); renderLog(); };
+document.getElementById('exportBtn').onclick = () => {
+  const blob = new Blob([JSON.stringify(loadLog(), null, 2)], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'task-monitor-log.json'; a.click();
+  URL.revokeObjectURL(url);
+};
+setInterval(() => { document.getElementById('clock').textContent = new Date().toLocaleString(); }, 1000);
+
+// ----------------------------------------------------------------------
+// SEQUENTIAL, NON-INTERRUPTING SPEECH QUEUE
+//
+// 'task'  priority = the step-by-step guidance ("move to target one",
+//         "target one complete, now move to target two", ...). These are
+//         ALWAYS queued and ALWAYS play in order — never dropped, never
+//         cancelled, never talked over by anything else.
+// 'info'  priority = ambient chatter (person detected, camera started,
+//         model status, off-route notices). These are dropped instead of
+//         queued whenever a task instruction is currently speaking or
+//         waiting — so nothing ever interrupts the active task guidance.
+// ----------------------------------------------------------------------
+let speechQueue = [];
+let speaking = false;
+
+function speak(text, priority = 'info'){
+  if(!voiceToggle.checked || !('speechSynthesis' in window) || !text) return;
+  if(priority !== 'task' && (speaking || speechQueue.length > 0)) return; // never interrupt
+  speechQueue.push(text);
+  pumpSpeechQueue();
+}
+function pumpSpeechQueue(){
+  if(speaking || speechQueue.length === 0) return;
+  const text = speechQueue.shift();
+  speaking = true;
+  try {
+    const utter = new SpeechSynthesisUtterance(text);
+    utter.rate = 0.95;
+    utter.pitch = 1.0;
+    utter.onend = () => { speaking = false; pumpSpeechQueue(); };
+    utter.onerror = () => { speaking = false; pumpSpeechQueue(); };
+    speechSynthesis.speak(utter);
+  } catch(e) {
+    console.warn('Speech synthesis error:', e);
+    speaking = false;
+  }
+}
+
+let alertTimer = null, correctTimer = null;
+// speechText === null means "show the banner but say nothing" — used for
+// off-route notices so they never interrupt the active task guidance.
+function showAlert(title, detail, speechText, duration=3500){
+  alertTitle.textContent = '🚨 ' + title;
+  alertDetail.textContent = detail;
+  correctBanner.classList.remove('show');
+  alertBanner.classList.add('show');
+  addLog('alert', `${title} — ${detail}`);
+  if(speechText) speak(speechText, 'info');
+  clearTimeout(alertTimer);
+  alertTimer = setTimeout(() => alertBanner.classList.remove('show'), duration);
+}
+function showCorrect(title, detail, speechText, duration=3000){
+  correctTitle.textContent = '🟢 ' + title;
+  correctDetail.textContent = detail;
+  alertBanner.classList.remove('show');
+  correctBanner.classList.add('show');
+  addLog('ok', `${title} — ${detail}`);
+  if(speechText) speak(speechText, 'task');
+  clearTimeout(correctTimer);
+  correctTimer = setTimeout(() => correctBanner.classList.remove('show'), duration);
+}
+
+// ----------------------------------------------------------------------
+// TASK UI
+// ----------------------------------------------------------------------
+function updateTaskUI(){
+  statePill.textContent = taskState;
+  statePill.className = 'state-pill ' + (
+    taskState === T_IDLE ? 'state-idle' :
+    taskState === T_WAITING ? 'state-waiting' :
+    taskState === T_HOLDING ? 'state-holding' : 'state-completed'
+  );
+  if(taskState === T_IDLE){
+    taskName.textContent = 'Waiting for an object…';
+    taskInstruction.textContent = 'Show one of the supported objects to the camera and a task will be assigned automatically.';
+  } else {
+    const def = TASKS[currentTaskClass];
+    taskName.textContent = def.label;
+    taskInstruction.textContent = def.instruction;
+  }
+}
+updateTaskUI();
+
+resetBtn.onclick = () => {
+  clearTimeout(nextTaskResetTimer);
+  resetRoute();
+  currentTaskClass = null;
+  taskState = T_IDLE;
+  updateTaskUI();
+  addLog('info', 'Task skipped by operator — waiting for a new object.');
+};
+
+// ----------------------------------------------------------------------
+// MODEL LOADING
+// coco-ssd: object detection (unchanged — well suited to the fixed
+//           TRACKABLE_OBJECT_CLASSES vocabulary already in TASKS).
+// PoseLandmarker (33 body points) + HandLandmarker (21 points/hand) via
+// MediaPipe Tasks Vision — replaces the old separate BlazePose/MoveNet +
+// FaceMesh stack. Face is deliberately never loaded or estimated.
+// ----------------------------------------------------------------------
+const VISION_CDN = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14';
+const POSE_MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/latest/pose_landmarker_lite.task';
+const HAND_MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task';
+
+async function loadModels(){
+  modelStatus.textContent = 'Loading models (pose + hands, no face)…';
+  objectModel = await cocoSsd.load({base:'mobilenet_v2'});
+
+  const vision = await FilesetResolver.forVisionTasks(`${VISION_CDN}/wasm`);
+
+  try {
+    poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
+      baseOptions: {modelAssetPath: POSE_MODEL_URL, delegate: 'GPU'},
+      runningMode: 'VIDEO', numPoses: 1
+    });
+  } catch(e) {
+    try {
+      poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
+        baseOptions: {modelAssetPath: POSE_MODEL_URL, delegate: 'CPU'},
+        runningMode: 'VIDEO', numPoses: 1
+      });
+    } catch(e2) {
+      poseLandmarker = null;
+      console.warn('Pose model unavailable; continuing without body skeleton.', e2);
+    }
+  }
+  addLog('info', poseLandmarker ? 'MediaPipe Pose Landmarker (33 points) loaded.' : 'Pose model failed to load — body tracking disabled.');
+
+  try {
+    handLandmarker = await HandLandmarker.createFromOptions(vision, {
+      baseOptions: {modelAssetPath: HAND_MODEL_URL, delegate: 'GPU'},
+      runningMode: 'VIDEO', numHands: 2
+    });
+  } catch(e) {
+    try {
+      handLandmarker = await HandLandmarker.createFromOptions(vision, {
+        baseOptions: {modelAssetPath: HAND_MODEL_URL, delegate: 'CPU'},
+        runningMode: 'VIDEO', numHands: 2
+      });
+    } catch(e2) {
+      handLandmarker = null;
+      console.warn('Hand model unavailable; continuing without hand skeleton/hand-fallback mode.', e2);
+    }
+  }
+  addLog('info', handLandmarker ? 'MediaPipe Hand Landmarker (21 points/hand) loaded.' : 'Hand model failed to load — hand tracking disabled.');
+
+  modelStatus.textContent = 'Models ready — offline capable (face tracking disabled by design)';
+  startBtn.disabled = false;
+}
+loadModels().catch(err => {
+  modelStatus.textContent = 'Model load failed — needs internet for first-time load';
+  addLog('alert', 'Model load error: ' + err.message);
+});
+
+if(!window.isSecureContext){
+  placeholder.innerHTML = '<b style="color:#ff5b5b">Camera will not work from a file:// page.</b><br/><br/>' +
+    'Serve this file locally instead:<br/>' +
+    '<code>python3 -m http.server 8000</code><br/>then open<br/>' +
+    '<code>http://localhost:8000/task_monitor.html</code>';
+  addLog('alert', 'Page is not a secure context (file://). Camera access will be blocked until served over localhost or https.');
+}
+
+// ----------------------------------------------------------------------
+// CAMERA
+// ----------------------------------------------------------------------
+function cameraErrorMessage(err){
+  if(!window.isSecureContext){
+    return 'Camera blocked: this page must be served from http://localhost or https:// — opening the file directly (file://) is not allowed by the browser.';
+  }
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+    return 'This browser does not support camera access. Try current Chrome or Firefox.';
+  }
+  switch(err.name){
+    case 'NotAllowedError': return 'Camera permission was denied. Click the camera icon in the address bar and allow access, then click Start Camera again.';
+    case 'NotFoundError': return 'No camera device was found. Check that a webcam is connected.';
+    case 'NotReadableError': return 'Camera is already in use by another app — close it and retry.';
+    case 'OverconstrainedError': return 'Requested camera resolution not supported by your device.';
+    default: return err.message || 'Unknown camera error.';
+  }
+}
+
+async function startCamera(){
+  try{
+    stream = await navigator.mediaDevices.getUserMedia({video:{width:1280, height:720}, audio:false});
+    video.srcObject = stream;
+    await video.play();
+    placeholder.style.display = 'none';
+    resizeOverlay();
+    running = true;
+    statCam.textContent = 'Online'; statCam.style.color = 'var(--target)';
+    startBtn.disabled = true; stopBtn.disabled = false;
+    addLog('info', 'Camera started (1280x720).');
+    detectLoop();
+  }catch(err){
+    const msg = cameraErrorMessage(err);
+    addLog('alert', 'Camera access failed: ' + msg);
+    placeholder.style.display = 'block';
+    placeholder.textContent = msg;
+  }
+}
+function stopCamera(){
+  running = false;
+  if(rafId) cancelAnimationFrame(rafId);
+  if(stream) stream.getTracks().forEach(t => t.stop());
+  smoothedKeypoints = null;
+  ctx.clearRect(0,0,overlay.width, overlay.height);
+  placeholder.style.display = 'block';
+  placeholder.textContent = 'Camera stopped.';
+  statCam.textContent = 'Offline'; statCam.style.color = 'var(--muted)';
+  startBtn.disabled = false; stopBtn.disabled = true;
+  addLog('info', 'Camera stopped.');
+}
+startBtn.onclick = startCamera;
+stopBtn.onclick = stopCamera;
+window.addEventListener('resize', resizeOverlay);
+
+// ----------------------------------------------------------------------
+// GEOMETRY & COORDINATE MAPPING
+// ----------------------------------------------------------------------
+function resizeOverlay(){
+  const rect = document.getElementById('stage').getBoundingClientRect();
+  overlay.width = Math.max(1, Math.round(rect.width));
+  overlay.height = Math.max(1, Math.round(rect.height));
+}
+
+function sourceToOverlay(point){
+  if(!point) return {x:0, y:0};
+  const sourceWidth = video.videoWidth || 1280;
+  const sourceHeight = video.videoHeight || 720;
+  const scale = Math.min(overlay.width / sourceWidth, overlay.height / sourceHeight);
+  const offsetX = (overlay.width - sourceWidth * scale) / 2;
+  const offsetY = (overlay.height - sourceHeight * scale) / 2;
+  return {
+    x: offsetX + point.x * scale,
+    y: offsetY + point.y * scale
+  };
+}
+
+function boxToOverlay(box){
+  const topLeft = sourceToOverlay({x:box[0], y:box[1]});
+  const bottomRight = sourceToOverlay({x:box[0] + box[2], y:box[1] + box[3]});
+  return [topLeft.x, topLeft.y, Math.max(1, bottomRight.x - topLeft.x), Math.max(1, bottomRight.y - topLeft.y)];
+}
+
+function mapKeypoints(keypoints){
+  return keypoints.map(k => ({...k, ...sourceToOverlay(k)}));
+}
+
+function drawMirroredText(text, screenX, screenY, font='12px monospace', color='#e8edf2', align='left', baseline='top'){
+  ctx.save();
+  const canvasX = overlay.width - screenX;
+  ctx.translate(canvasX, screenY);
+  ctx.scale(-1, 1);
+  ctx.font = font;
+  ctx.fillStyle = color;
+  ctx.textAlign = align;
+  ctx.textBaseline = baseline;
+  ctx.fillText(text, 0, 0);
+  ctx.restore();
+}
+
+function bboxCenter(box){ return {x:box[0] + box[2] / 2, y:box[1] + box[3] / 2}; }
+function bboxIoU(a, b){
+  const x1 = Math.max(a[0], b[0]), y1 = Math.max(a[1], b[1]);
+  const x2 = Math.min(a[0] + a[2], b[0] + b[2]), y2 = Math.min(a[1] + a[3], b[1] + b[3]);
+  const intersection = Math.max(0, x2 - x1) * Math.max(0, y2 - y1);
+  return intersection / Math.max(a[2] * a[3] + b[2] * b[3] - intersection, 1);
+}
+// "Majority overlap" test used for target-entry detection (see
+// validateTargetMovement): divides the intersection by whichever of the
+// two boxes is SMALLER, so it correctly counts as "at the target" both
+// when a small object sits mostly inside a bigger target box, and when
+// an object bigger than the target box mostly covers it — i.e. it
+// doesn't matter whether the object sticks out past the target's edges,
+// only whether the overlap is the majority of the smaller shape.
+function overlapRatio(a, b){
+  const x1 = Math.max(a[0], b[0]), y1 = Math.max(a[1], b[1]);
+  const x2 = Math.min(a[0] + a[2], b[0] + b[2]), y2 = Math.min(a[1] + a[3], b[1] + b[3]);
+  const intersection = Math.max(0, x2 - x1) * Math.max(0, y2 - y1);
+  const areaA = Math.max(1, a[2] * a[3]), areaB = Math.max(1, b[2] * b[3]);
+  return intersection / Math.min(areaA, areaB);
+}
+
+function resetRoute(){
+  routeTargets = [];
+  currentTargetIndex = -1;
+  targetDwellStartedAt = 0;
+  trackedObject = null;
+  movementHistory.length = 0;
+  lastMovementStatus = 'Waiting for object';
+  targetSequence.innerHTML = '';
+  updateTrackingUI();
+}
+
+function generateTargets(){
+  const width = overlay.width, height = overlay.height;
+  const size = Math.max(64, Math.min(112, Math.round(Math.min(width, height) * 0.15)));
+  const margin = size * 0.8;
+  const positions = [];
+  for(let i = 0; i < TARGET_NAMES.length; i++){
+    let candidate = null;
+    for(let attempt = 0; attempt < 80; attempt++){
+      const x = margin + Math.random() * Math.max(1, width - size - margin * 2);
+      const y = margin + Math.random() * Math.max(1, height - size - margin * 2);
+      if(positions.every(p => Math.hypot(p.x - x, p.y - y) >= size * 1.8)){
+        candidate = {x, y}; break;
+      }
+    }
+    if(!candidate) candidate = [{x:margin,y:margin},{x:width-size-margin,y:margin},{x:margin,y:height-size-margin},{x:width-size-margin,y:height-size-margin}][i];
+    positions.push(candidate);
+  }
+  // `announced` guards each target's completion message to fire exactly
+  // once per route, no matter how many times the object is lost/reacquired
+  // or drifts back through an already-completed target zone afterward.
+  routeTargets = positions.map((p, index) => ({...p, size, index, color:TARGET_COLORS[index], name:TARGET_NAMES[index], announced:false}));
+  currentTargetIndex = 0;
+  targetDwellStartedAt = 0;
+  targetSequence.innerHTML = routeTargets.map((target, index) => `<div class="target-step" data-target="${index}"><span class="target-chip" style="background:${target.color}"></span>TARGET ${index + 1} ${target.name} <span class="target-state">WAITING</span></div>`).join('');
+  updateTrackingUI();
+}
+
+function drawTargets(){
+  routeTargets.forEach((target, index) => {
+    const active = index === currentTargetIndex;
+    const completed = index < currentTargetIndex;
+    ctx.save();
+    ctx.strokeStyle = completed ? '#3ddc84' : target.color;
+    ctx.fillStyle = completed ? 'rgba(61,220,132,.12)' : `rgba(0,0,0,.18)`;
+    ctx.lineWidth = active ? 3 : 2;
+    ctx.setLineDash(active ? [8, 5] : []);
+    ctx.fillRect(target.x, target.y, target.size, target.size);
+    ctx.strokeRect(target.x, target.y, target.size, target.size);
+    ctx.setLineDash([]);
+    ctx.restore();
+
+    const targetScreenX = overlay.width - target.x - target.size + 8;
+    const statusText = completed ? 'COMPLETED' : active ? 'CURRENT' : 'WAITING';
+    drawMirroredText(`TARGET ${index + 1}`, targetScreenX, target.y + 10, '600 12px monospace', target.color, 'left', 'top');
+    drawMirroredText(statusText, targetScreenX, target.y + target.size - 20, '10px monospace', target.color, 'left', 'top');
+  });
+}
+
+function updateTrackingUI(){
+  const hasTrack = !!trackedObject;
+  const nameMap = {'bottle': 'Water Bottle', 'cell phone': 'Phone', 'book': 'Book', 'hand': 'Hand'};
+  const displayName = hasTrack ? (nameMap[trackedObject.class] || trackedObject.class) : 'Waiting';
+  trackedObjectLabel.textContent = displayName;
+  trackedObjectIdLabel.textContent = hasTrack ? `#${String(trackedObject.id).padStart(2, '0')}` : '--';
+  trackedStepLabel.textContent = currentTargetIndex < 0 ? '0 / 4' : `${Math.min(currentTargetIndex + 1, 4)} / 4`;
+  const direction = hasTrack ? Math.round(Math.atan2(trackedObject.velocity.y, trackedObject.velocity.x) * 180 / Math.PI) : 0;
+  trackingStatusLabel.textContent = hasTrack ? `${lastMovementStatus} · ${Math.round(trackedObject.confidence * 100)}% · ${direction}°` : lastMovementStatus;
+  targetSequence.querySelectorAll('.target-step').forEach((element, index) => {
+    element.className = 'target-step ' + (index < currentTargetIndex ? 'done' : index === currentTargetIndex ? 'current' : '');
+    const state = element.querySelector('.target-state');
+    if(state) state.textContent = index < currentTargetIndex ? 'COMPLETED' : index === currentTargetIndex ? 'CURRENT' : 'WAITING';
+  });
+}
+
+// ----------------------------------------------------------------------
+// OBJECT TRACKING + TASK ASSIGNMENT
+//
+// Three distinct situations are handled separately so voice guidance
+// never repeats or misfires:
+//   1. Brand-new task (no active route)        -> generate route, announce "move to target one"
+//   2. Reacquiring the SAME object mid-route     -> resume silently, no announcement, no route reset
+//   3. A route that just fully completed and is
+//      waiting out NEXT_TASK_DELAY_MS            -> ignored until the reset timer fires
+// ----------------------------------------------------------------------
+function updateTrackedObject(detections){
+  const candidates = detections.filter(o => TRACKABLE_OBJECT_CLASSES.includes(o.class));
+  const now = performance.now();
+  if(candidates.length > 0) lastObjectSeenTime = Date.now();
+
+  let match = null;
+  if(trackedObject && trackedObject.class !== 'hand'){
+    match = candidates.filter(o => o.class === trackedObject.class).reduce((best, candidate) => {
+      const distance = Math.hypot(bboxCenter(candidate.bbox).x - trackedObject.center.x, bboxCenter(candidate.bbox).y - trackedObject.center.y);
+      const score = bboxIoU(candidate.bbox, trackedObject.bbox) * 500 - distance;
+      return !best || score > best.score ? {candidate, score} : best;
+    }, null);
+    if(match && match.score < -TRACK_MATCH_DISTANCE) match = null;
+  }
+
+  if(match){
+    const candidate = match.candidate;
+    const center = bboxCenter(candidate.bbox);
+    const dt = Math.max((now - trackedObject.lastTime) / 1000, 1 / 60);
+    trackedObject.velocity = {x:(center.x - trackedObject.center.x) / dt, y:(center.y - trackedObject.center.y) / dt};
+    trackedObject.bbox = candidate.bbox;
+    trackedObject.center = center;
+    trackedObject.confidence = candidate.score;
+    trackedObject.lastTime = now;
+    trackedObject.missed = 0;
+    trackedObject.lastSeen = true;
+  } else if(trackedObject && trackedObject.class !== 'hand' && trackedObject.missed < TRACK_MAX_MISSED){
+    const dt = Math.max((now - trackedObject.lastTime) / 1000, 1 / 60);
+    const shiftX = trackedObject.velocity.x * dt * 0.35;
+    const shiftY = trackedObject.velocity.y * dt * 0.35;
+    trackedObject.bbox = [trackedObject.bbox[0] + shiftX, trackedObject.bbox[1] + shiftY, trackedObject.bbox[2], trackedObject.bbox[3]];
+    trackedObject.center = bboxCenter(trackedObject.bbox);
+    trackedObject.confidence *= 0.92;
+    trackedObject.lastTime = now;
+    trackedObject.missed++;
+    trackedObject.lastSeen = false;
+  } else if(candidates.length){
+    const candidate = candidates[0];
+    const nameMap = {'bottle': 'Water Bottle', 'cell phone': 'Phone', 'book': 'Book'};
+    const label = nameMap[candidate.class] || candidate.class;
+    const routeInProgress = currentTargetIndex >= 0 && currentTargetIndex < routeTargets.length;
+    const isReacquisition = routeInProgress && currentTaskClass === candidate.class;
+    const routeJustFinished = routeTargets.length > 0 && currentTargetIndex >= routeTargets.length;
+
+    if(routeJustFinished){
+      // A route just completed and we're inside NEXT_TASK_DELAY_MS —
+      // don't touch the finished route or say anything about it again.
+      return;
+    }
+
+    trackedObject = {id:nextTrackId++, class:candidate.class, bbox:candidate.bbox, center:bboxCenter(candidate.bbox), velocity:{x:0,y:0}, confidence:candidate.score, lastTime:now, missed:0, lastSeen:true, previousTarget:-1};
+
+    if(isReacquisition){
+      // Same object, same in-progress route — resume silently. This is
+      // what stops "Target 1 complete" (or "move to target one") from
+      // firing again just because the object briefly left frame.
+      lastMovementStatus = `${label} back in view — continue to Target ${currentTargetIndex + 1}`;
+    } else if(!routeInProgress){
+      currentTaskClass = candidate.class;
+      taskState = T_WAITING;
+      updateTaskUI();
+      generateTargets();
+      lastMovementStatus = `${label} detected — move to Target 1`;
+      addLog('info', `${TASKS[candidate.class]?.label || (label + ' Detected')}`);
+      speak(`${label} detected. Complete the given task. Move it to target one.`, 'task');
+    }
+  } else if(trackedObject && trackedObject.class !== 'hand' && trackedObject.missed >= TRACK_MAX_MISSED){
+    const routeInProgress = currentTargetIndex >= 0 && currentTargetIndex < routeTargets.length;
+    lastMovementStatus = routeInProgress ? `Object lost — resume Target ${currentTargetIndex + 1} when back in view` : 'Object lost';
+    trackedObject = null;
+  }
+  updateTrackingUI();
+}
+
+function updateHandFallback(handBoxes){
+  if(trackedObject && trackedObject.class !== 'hand') return;
+  if(Date.now() - lastObjectSeenTime < HAND_FALLBACK_DELAY_MS) return; // only after 15s with no object at all
+  if(!handBoxes.length) return;
+
+  const hand = handBoxes[0]; // most confident hand
+  const routeInProgress = currentTargetIndex >= 0 && currentTargetIndex < routeTargets.length;
+  if(!trackedObject || trackedObject.class !== 'hand'){
+    trackedObject = {id:nextTrackId++, class:'hand', bbox:hand.bbox, center:bboxCenter(hand.bbox), velocity:{x:0,y:0}, confidence:hand.score, lastTime:performance.now(), missed:0, lastSeen:true, previousTarget:-1};
+    if(!routeInProgress){
+      currentTaskClass = 'hand';
+      taskState = T_WAITING;
+      updateTaskUI();
+      generateTargets();
+      lastMovementStatus = 'No object for 15s — Hand mode active';
+      speak('Hand detected. Complete the given task. Move it to target one.', 'task');
+    } else {
+      lastMovementStatus = `Hand mode resumed — continue to Target ${currentTargetIndex + 1}`;
+    }
+    updateTrackingUI();
+  } else {
+    // keep the hand track fresh each frame while in hand mode
+    const center = bboxCenter(hand.bbox);
+    const dt = Math.max((performance.now() - trackedObject.lastTime) / 1000, 1/60);
+    trackedObject.velocity = {x:(center.x - trackedObject.center.x)/dt, y:(center.y - trackedObject.center.y)/dt};
+    trackedObject.bbox = hand.bbox;
+    trackedObject.center = center;
+    trackedObject.confidence = hand.score;
+    trackedObject.lastTime = performance.now();
+    trackedObject.missed = 0;
+    trackedObject.lastSeen = true;
+  }
+}
+
+function scheduleNextTaskReset(){
+  clearTimeout(nextTaskResetTimer);
+  nextTaskResetTimer = setTimeout(() => {
+    resetRoute();
+    currentTaskClass = null;
+    taskState = T_IDLE;
+    updateTaskUI();
+    addLog('info', 'Ready for a new task — show an object to begin.');
+  }, NEXT_TASK_DELAY_MS);
+}
+
+function validateTargetMovement(){
+  if(!trackedObject || currentTargetIndex < 0 || currentTargetIndex >= routeTargets.length || !routeTargets.length) return;
+  const now = performance.now();
+  const displayBox = boxToOverlay(trackedObject.bbox);
+
+  // Majority-overlap based target detection (see overlapRatio docstring):
+  // counts the object as "at" whichever target it overlaps most, as long
+  // as that overlap clears TARGET_OVERLAP_RATIO — not a strict
+  // point-in-box test, so it doesn't matter if the object pokes outside
+  // the target's edges as long as the majority of it is there.
+  let entered = -1, bestRatio = 0;
+  routeTargets.forEach((target, i) => {
+    const r = overlapRatio(displayBox, [target.x, target.y, target.size, target.size]);
+    if(r >= TARGET_OVERLAP_RATIO && r > bestRatio){ bestRatio = r; entered = i; }
+  });
+
+  const previous = trackedObject.previousTarget;
+  if(entered !== previous){
+    trackedObject.previousTarget = entered;
+    movementHistory.push({objectId:trackedObject.id, timestamp:Date.now(), x:trackedObject.center.x, y:trackedObject.center.y, bbox:[...trackedObject.bbox], currentTarget:currentTargetIndex, previousTarget:previous, direction:Math.atan2(trackedObject.velocity.y, trackedObject.velocity.x), targetEntered:entered, targetExited:previous, correct:entered === currentTargetIndex});
+    if(movementHistory.length > MOVEMENT_HISTORY_LIMIT) movementHistory.shift();
+  }
+
+  if(entered === currentTargetIndex){
+    if(!targetDwellStartedAt) targetDwellStartedAt = now;
+    const dwellMs = now - targetDwellStartedAt;
+    const dwellSeconds = Math.min(2, Math.floor(dwellMs / 1000));
+    lastMovementStatus = trackedObject.lastSeen ? `In Target ${currentTargetIndex + 1} · ${dwellSeconds}/2s` : `Tracking placement · ${dwellSeconds}/2s`;
+
+    if(trackedObject.lastSeen && dwellMs >= TARGET_DWELL_MS && !routeTargets[currentTargetIndex].announced){
+      routeTargets[currentTargetIndex].announced = true; // fires exactly once, ever, for this route
+      const completedStep = currentTargetIndex + 1;
+      currentTargetIndex++;
+      targetDwellStartedAt = 0;
+      if(currentTargetIndex >= routeTargets.length){
+        lastMovementStatus = 'Task completed';
+        showCorrect('TASK COMPLETED', 'Object successfully reached all four targets.', 'Task completed. Great job.', 5000);
+        scheduleNextTaskReset();
+      } else {
+        const nextStep = currentTargetIndex + 1;
+        showCorrect(`TARGET ${completedStep} COMPLETED`, `Now move object to Target ${nextStep}.`,
+          `Target ${TARGET_WORDS[completedStep - 1]} complete. Now move to target ${TARGET_WORDS[currentTargetIndex]}.`);
+      }
+    }
+  } else if(entered === previous && previous < currentTargetIndex){
+    targetDwellStartedAt = 0;
+    lastMovementStatus = `Target ${previous + 1} completed · Move to Target ${currentTargetIndex + 1}`;
+  } else if(entered >= 0){
+    targetDwellStartedAt = 0;
+    lastMovementStatus = entered > currentTargetIndex ? `Wrong movement: Target ${entered + 1} entered` : `Wrong target: Target ${entered + 1}`;
+    // Visual + log only — deliberately no voice here, so an off-route
+    // dip never talks over the active step-by-step task guidance.
+    if(Date.now() - lastWrongAlertAt > WRONG_TARGET_COOLDOWN_MS){
+      lastWrongAlertAt = Date.now();
+      showAlert('PROCEDURE STEP MISSED', `Please complete Target ${currentTargetIndex + 1} first before moving to Target ${entered + 1}.`, null);
+    }
+  } else if(previous === currentTargetIndex){
+    targetDwellStartedAt = 0;
+    lastMovementStatus = 'Step in progress';
+  } else {
+    targetDwellStartedAt = 0;
+    lastMovementStatus = `Move object to Target ${currentTargetIndex + 1}`;
+  }
+  updateTrackingUI();
+}
+
+function pointToBoxDistance(px, py, bbox){
+  const [x, y, w, h] = bbox;
+  const cx = Math.max(x, Math.min(px, x + w));
+  const cy = Math.max(y, Math.min(py, y + h));
+  return Math.hypot(px - cx, py - cy);
+}
+
+// ----------------------------------------------------------------------
+// BODY SKELETON RENDERER — MediaPipe Pose Landmarker topology (33 pts),
+// matching the reference pose-landmark diagram exactly. Face landmarks
+// (indices 0-10 besides the nose) are intentionally never drawn — only
+// the nose point is used, as a simple head marker.
+// ----------------------------------------------------------------------
+function drawBodySkeleton(kps, ctx){
+  const point = idx => { const k = kps[idx]; return k && k.score >= KEYPOINT_MIN_SCORE ? k : null; };
+  const nose=point(0), leftEar=point(7), rightEar=point(8),
+        leftShoulder=point(11), rightShoulder=point(12), leftElbow=point(13), rightElbow=point(14),
+        leftWrist=point(15), rightWrist=point(16), leftHip=point(23), rightHip=point(24),
+        leftKnee=point(25), rightKnee=point(26), leftAnkle=point(27), rightAnkle=point(28);
+
+  let refSpan = 120;
+  if(leftShoulder && rightShoulder) refSpan = Math.hypot(leftShoulder.x - rightShoulder.x, leftShoulder.y - rightShoulder.y);
+  else if(leftHip && rightHip) refSpan = Math.hypot(leftHip.x - rightHip.x, leftHip.y - rightHip.y);
+  const scale = Math.max(0.4, Math.min(2.5, refSpan / 140));
+  const boneWidth = Math.max(1.2, Math.min(3.8, 2.0 * scale));
+  const jointRadius = Math.max(2.0, Math.min(6.5, 3.2 * scale));
+
+  const pairs=[[leftShoulder,leftElbow,'#29d9ff'],[leftElbow,leftWrist,'#29d9ff'],[rightShoulder,rightElbow,'#29d9ff'],[rightElbow,rightWrist,'#29d9ff'],
+    [leftHip,leftKnee,'#b6e632'],[leftKnee,leftAnkle,'#b6e632'],[rightHip,rightKnee,'#b6e632'],[rightKnee,rightAnkle,'#b6e632'],
+    [leftShoulder,rightShoulder,'#3c8cff'],[leftHip,rightHip,'#a64cff'],[leftShoulder,leftHip,'#f3d629'],[rightShoulder,rightHip,'#f3d629']];
+
+  ctx.save(); ctx.lineCap='round'; ctx.lineJoin='round'; ctx.lineWidth=boneWidth; ctx.shadowColor='#00eaff'; ctx.shadowBlur=6;
+  pairs.forEach(([a,b,color])=>{ if(!a||!b) return; ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.strokeStyle=color; ctx.stroke(); });
+  if(leftShoulder && rightShoulder && nose){
+    const neck={x:(leftShoulder.x+rightShoulder.x)/2, y:(leftShoulder.y+rightShoulder.y)/2};
+    ctx.beginPath(); ctx.moveTo(nose.x,nose.y); ctx.lineTo(neck.x,neck.y); ctx.strokeStyle='#f05bcf'; ctx.stroke();
+  }
+  if(nose && leftEar && rightEar){
+    const radius = Math.max(10, Math.hypot(leftEar.x-rightEar.x, leftEar.y-rightEar.y)*.9);
+    ctx.beginPath(); ctx.ellipse(nose.x, nose.y-radius*.2, radius*.72, radius, 0, 0, Math.PI*2);
+    ctx.strokeStyle='rgba(240,91,207,.8)'; ctx.lineWidth=1.4; ctx.stroke();
+  }
+  [nose,leftEar,rightEar,leftShoulder,rightShoulder,leftElbow,rightElbow,leftWrist,rightWrist,leftHip,rightHip,leftKnee,rightKnee,leftAnkle,rightAnkle].forEach(joint=>{
+    if(!joint) return;
+    ctx.beginPath(); ctx.arc(joint.x, joint.y, joint===nose ? jointRadius*1.1 : jointRadius, 0, Math.PI*2);
+    ctx.fillStyle='#f8fbff'; ctx.fill(); ctx.strokeStyle='#00eaff'; ctx.lineWidth=1; ctx.stroke();
+  });
+  ctx.restore();
+}
+
+// ----------------------------------------------------------------------
+// HAND SKELETON RENDERER — MediaPipe Hand Landmarker topology (21 pts),
+// matching the reference hand-landmark diagram exactly.
+// ----------------------------------------------------------------------
+function drawHandSkeleton(points, label, ctx){
+  ctx.save();
+  ctx.lineCap='round'; ctx.lineJoin='round'; ctx.lineWidth=2; ctx.strokeStyle=HAND_COLOR;
+  ctx.shadowColor='rgba(41,217,255,.7)'; ctx.shadowBlur=5;
+  HAND_CONNECTIONS.forEach(([a,b]) => {
+    const pa=points[a], pb=points[b];
+    if(!pa||!pb) return;
+    ctx.beginPath(); ctx.moveTo(pa.x,pa.y); ctx.lineTo(pb.x,pb.y); ctx.stroke();
+  });
+  points.forEach((p,i) => {
+    if(!p) return;
+    ctx.beginPath(); ctx.arc(p.x,p.y, i===0?4:2.5, 0, Math.PI*2);
+    ctx.fillStyle = i===0 ? '#ffffff' : '#e8edf2'; ctx.fill();
+    ctx.strokeStyle = HAND_COLOR; ctx.lineWidth=1; ctx.stroke();
+  });
+  if(points[0] && label) drawMirroredText(label, overlay.width - points[0].x, points[0].y + 14, '600 10px monospace', HAND_COLOR, 'left', 'top');
+  ctx.restore();
+}
+
+// ----------------------------------------------------------------------
+// MAIN LOOP
+// ----------------------------------------------------------------------
+let lastPoseTs = -1, lastHandTs = -1;
+async function detectLoop(){
+  if(!running) return;
+  const t0 = performance.now();
+
+  const rawObjects = await objectModel.detect(video);
+
+  const vw = video.videoWidth || 1280, vh = video.videoHeight || 720;
+  let poseResult = null, handResult = null;
+  const ts = Math.max(Math.floor(performance.now()), lastPoseTs + 1, lastHandTs + 1);
+  if(poseLandmarker){ poseResult = poseLandmarker.detectForVideo(video, ts); lastPoseTs = ts; }
+  if(handLandmarker){ handResult = handLandmarker.detectForVideo(video, ts); lastHandTs = ts; }
+
+  ctx.clearRect(0,0,overlay.width, overlay.height);
+
+  const objects = rawObjects.filter(o => o.score >= OBJECT_MIN_SCORE);
+  updateTrackedObject(objects);
+  drawTargets();
+
+  // ---- collect + draw non-person objects ----
+  let personCountRaw = 0;
+  const liveBoxes = {};
+  objects.forEach(o => {
+    if(o.class === 'person'){ personCountRaw++; return; }
+    if(TASKS[o.class] && !liveBoxes[o.class]) liveBoxes[o.class] = o.bbox;
+
+    const isTarget = (o.class === currentTaskClass);
+    const color = isTarget ? TARGET_COLOR : OBJECT_COLOR;
+    const displayBox = boxToOverlay(o.bbox);
+    ctx.strokeStyle = color; ctx.lineWidth = isTarget ? 3 : 2;
+    ctx.strokeRect(displayBox[0], displayBox[1], displayBox[2], displayBox[3]);
+    ctx.save(); ctx.translate(overlay.width, 0); ctx.scale(-1,1);
+    ctx.fillStyle = color; ctx.font = '13px monospace';
+    const trackText = trackedObject && o.class === trackedObject.class ? ` ID #${String(trackedObject.id).padStart(2, '0')}` : '';
+    ctx.fillText(`${o.class}${trackText}${isTarget?' (TASK)':''} ${(o.score*100).toFixed(0)}%`, displayBox[0], displayBox[1]>14? displayBox[1]-6 : displayBox[1]+14);
+    ctx.restore();
+  });
+  if(trackedObject && !trackedObject.lastSeen){
+    const predictedBox = boxToOverlay(trackedObject.bbox);
+    ctx.save();
+    ctx.strokeStyle = 'rgba(91,140,255,.8)'; ctx.lineWidth = 2; ctx.setLineDash([5, 4]);
+    ctx.strokeRect(predictedBox[0], predictedBox[1], predictedBox[2], predictedBox[3]);
+    ctx.setLineDash([]); ctx.font = '11px monospace'; ctx.fillStyle = PERSON_COLOR;
+    ctx.fillText(`${trackedObject.class} ID #${String(trackedObject.id).padStart(2, '0')} TRACKING`, predictedBox[0], Math.max(12, predictedBox[1] - 5));
+    ctx.restore();
+  }
+
+  const nowMs = Date.now();
+  Object.keys(liveBoxes).forEach(cls => { objectMemory[cls] = {bbox: liveBoxes[cls], lastSeen: nowMs}; });
+
+  // ---- pose: smooth keypoints (EMA), draw body skeleton (no face) ----
+  const pose = poseResult && poseResult.landmarks && poseResult.landmarks[0];
+  if(pose){
+    const raw = pose.map(lm => ({x: lm.x * vw, y: lm.y * vh, score: typeof lm.visibility === 'number' ? lm.visibility : 1}));
+    if(!smoothedKeypoints || smoothedKeypoints.length !== raw.length){
+      smoothedKeypoints = raw.map(k => ({x:k.x, y:k.y, score:k.score}));
+    }
+    const kps = raw.map((k, i) => {
+      const prev = smoothedKeypoints[i];
+      if(k.score < KEYPOINT_MIN_SCORE) return {x:prev.x, y:prev.y, score:k.score};
+      const dist = Math.hypot(k.x - prev.x, k.y - prev.y);
+      let a = KEYPOINT_SMOOTHING;
+      if(dist > 25) a = 0.2; else if(dist > 10) a = 0.4;
+      return {x: prev.x*a + k.x*(1-a), y: prev.y*a + k.y*(1-a), score:k.score};
+    });
+    smoothedKeypoints = kps;
+    const displayKps = mapKeypoints(kps);
+
+    const valid = kps.filter(k => k.score > KEYPOINT_MIN_SCORE);
+    if(valid.length >= 4){
+      let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+      valid.forEach(k=>{ minX=Math.min(minX,k.x); minY=Math.min(minY,k.y); maxX=Math.max(maxX,k.x); maxY=Math.max(maxY,k.y); });
+      const padX = (maxX-minX)*0.15 + 10, padY = (maxY-minY)*0.15 + 10;
+      ctx.strokeStyle = PERSON_COLOR; ctx.lineWidth = 1.8; ctx.setLineDash([4, 4]);
+      const displayBox = boxToOverlay([minX-padX, minY-padY, (maxX-minX)+2*padX, (maxY-minY)+2*padY]);
+      ctx.strokeRect(displayBox[0], displayBox[1], displayBox[2], displayBox[3]);
+      ctx.setLineDash([]);
+    }
+    drawBodySkeleton(displayKps, ctx);
+  } else {
+    smoothedKeypoints = null;
+  }
+
+  // ---- hands: draw skeletons, build bbox list for hand-fallback mode ----
+  const handBoxesForFallback = [];
+  if(handResult && handResult.landmarks && handResult.landmarks.length){
+    handResult.landmarks.forEach((lms, i) => {
+      const handedness = handResult.handednesses && handResult.handednesses[i] && handResult.handednesses[i][0];
+      const score = handedness ? handedness.score : 1;
+      if(score < HAND_MIN_SCORE) return;
+      const pxPoints = lms.map(lm => ({x: lm.x * vw, y: lm.y * vh}));
+      const displayPoints = mapKeypoints(pxPoints);
+      const label = handedness ? handedness.categoryName : '';
+      drawHandSkeleton(displayPoints, label, ctx);
+
+      let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+      pxPoints.forEach(p=>{ minX=Math.min(minX,p.x); minY=Math.min(minY,p.y); maxX=Math.max(maxX,p.x); maxY=Math.max(maxY,p.y); });
+      const pad = Math.max(10, (maxX-minX) * 0.2);
+      handBoxesForFallback.push({bbox:[minX-pad, minY-pad, (maxX-minX)+2*pad, (maxY-minY)+2*pad], score});
+    });
+    handBoxesForFallback.sort((a,b) => b.score - a.score);
+  }
+  updateHandFallback(handBoxesForFallback);
+
+  // ---- multi-person count (coco-ssd instance count; skeleton drawn for primary pose only) ----
+  if(personCountRaw === personCandidateValue){
+    personCandidateFrames++;
+  } else {
+    personCandidateValue = personCountRaw;
+    personCandidateFrames = 1;
+  }
+  if(personCandidateFrames === PERSON_CONFIRM_FRAMES && personCandidateValue !== personConfirmed){
+    if(personCandidateValue > personConfirmed){
+      const msg = personCandidateValue === 1 ? 'Person detected' : 'Another person detected';
+      addLog('info', msg + ` (${personCandidateValue} in frame)`);
+      speak(msg, 'info');
+    } else if(personCandidateValue === 0 && personConfirmed > 0){
+      addLog('info', 'Frame is now empty — no person detected.');
+    }
+    personConfirmed = personCandidateValue;
+  }
+  document.getElementById('statPersonCount').textContent = personCountRaw;
+
+  // ---- STRICT TARGET ROUTE ----
+  validateTargetMovement();
+
+  const dt = performance.now() - t0;
+  fpsLabel.textContent = (1000/Math.max(dt, 33)).toFixed(1) + ' fps';
+
+  rafId = requestAnimationFrame(detectLoop);
+}
+</script>
+</body>
+</html>

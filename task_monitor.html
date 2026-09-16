@@ -1,0 +1,1337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>AI Task Monitor — Auto Task Assignment (Offline)</title>
+<style>
+  :root{
+    --bg:#0b0f14; --panel:#11161d; --panel-2:#151b23; --border:#232b35;
+    --accent:#3ecfd6; --person:#5b8cff; --target:#3ddc84; --object:#f4c542; --red:#ff5b5b;
+    --text:#e8edf2; --muted:#8493a3;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:var(--bg); color:var(--text);
+    font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    height:100vh; display:flex; flex-direction:column;
+  }
+  header{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:12px 20px; background:var(--panel); border-bottom:1px solid var(--border);
+  }
+  header .title{display:flex; align-items:center; gap:10px; font-weight:600; font-size:16px;}
+  header .dot{width:9px;height:9px;border-radius:50%;background:var(--target); box-shadow:0 0 8px var(--target);}
+  header .status{font-size:12px; color:var(--muted);}
+  header .nav-links{display:flex; gap:12px; align-items:center;}
+  header .nav-link{
+    color:var(--accent); text-decoration:none; font-size:12px; font-weight:500;
+    padding:5px 12px; border:1px solid var(--border); border-radius:6px; background:var(--panel-2);
+    transition: all 0.2s ease; display:inline-flex; align-items:center; gap:6px;
+  }
+  header .nav-link:hover{border-color:var(--accent); background:rgba(62,207,214,0.12);}
+  main{flex:1; display:grid; grid-template-columns:2fr 1fr; gap:14px; padding:14px; min-height:0;}
+  .panel{background:var(--panel); border:1px solid var(--border); border-radius:10px; display:flex; flex-direction:column; min-height:0;}
+  .cam-panel{position:relative; overflow:hidden;}
+  .cam-header{padding:10px 14px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center;}
+  .cam-header h2{font-size:13px; margin:0; font-weight:600; color:var(--muted); letter-spacing:.04em; text-transform:uppercase;}
+  .cam-stage{position:relative; flex:1; background:#000; display:flex; align-items:center; justify-content:center;}
+  video, canvas{position:absolute; top:0; left:0; width:100%; height:100%; object-fit:contain;}
+  video{transform:scaleX(-1);}
+  canvas{transform:scaleX(-1); pointer-events:none;}
+  .placeholder{color:var(--muted); font-size:13px; z-index:2; text-align:center; padding:0 20px;}
+  .controls{display:flex; gap:8px; padding:10px 14px; border-top:1px solid var(--border); flex-wrap:wrap; align-items:center;}
+  button{
+    background:var(--panel-2); color:var(--text); border:1px solid var(--border);
+    padding:8px 14px; border-radius:6px; cursor:pointer; font-size:12px; font-weight:500;
+  }
+  button:hover{border-color:var(--accent);}
+  button.primary{background:var(--accent); color:#04161a; border:none;}
+  button.danger{background:var(--red); color:#210; border:none;}
+  button:disabled{opacity:.4; cursor:not-allowed;}
+  .legend{display:flex; gap:14px; font-size:11px; color:var(--muted); align-items:center; margin-left:auto;}
+  .legend span{display:flex; align-items:center; gap:5px;}
+  .swatch{width:10px;height:10px;border-radius:2px;display:inline-block;}
+
+  .side{display:flex; flex-direction:column; gap:14px; min-height:0;}
+  .task-panel{padding:14px;}
+  .task-panel h2{font-size:13px; margin:0 0 10px; font-weight:600; color:var(--muted); letter-spacing:.04em; text-transform:uppercase;}
+  .task-name{font-size:20px; font-weight:700; color:var(--target); margin-bottom:6px;}
+  .task-instruction{font-size:12.5px; color:var(--text); opacity:.85; margin-bottom:10px; line-height:1.4;}
+  .state-pill{display:inline-block; padding:4px 10px; border-radius:20px; font-size:12px; font-weight:700; letter-spacing:.03em;}
+  .state-idle{background:rgba(132,147,163,.15); color:var(--muted);}
+  .state-waiting{background:rgba(91,140,255,.15); color:var(--person);}
+  .state-holding{background:rgba(244,197,66,.15); color:var(--object);}
+  .state-completed{background:rgba(61,220,132,.15); color:var(--target);}
+  .stat-row{display:flex; justify-content:space-between; padding:7px 0; font-size:12.5px; border-bottom:1px solid var(--border);}
+  .stat-row:last-child{border-bottom:none;}
+  .stat-row .v{font-weight:600;}
+  .tracking-panel{padding:14px;}
+  .tracking-panel h2{font-size:13px; margin:0 0 10px; color:var(--muted); letter-spacing:.04em; text-transform:uppercase;}
+  .tracking-meta{display:grid; grid-template-columns:1fr 1fr; gap:6px 14px; font-size:12px;}
+  .tracking-meta b{color:var(--text);}
+  .target-sequence{display:grid; gap:5px; margin-top:10px;}
+  .target-step{display:flex; align-items:center; gap:8px; font-size:11px; color:var(--muted);}
+  .target-step.current{color:var(--text); font-weight:700;}
+  .target-step.done{color:var(--target);}
+  .target-chip{width:13px; height:13px; border-radius:2px; display:inline-block; flex:0 0 auto;}
+
+  .banner{margin:0 14px 14px; padding:12px 14px; border-radius:8px; display:none; flex-direction:column; gap:4px;}
+  .banner.show{display:flex;}
+  .banner.alert{background:rgba(255,91,91,.12); border:1px solid var(--red);}
+  .banner.correct{background:rgba(61,220,132,.12); border:1px solid var(--target);}
+  .banner .b-title{font-weight:700; font-size:13px;}
+  .banner.alert .b-title{color:var(--red);}
+  .banner.correct .b-title{color:var(--target);}
+  .banner .b-detail{font-size:12px; color:var(--text); opacity:.85;}
+
+  .log-panel{flex:1; min-height:0; display:flex; flex-direction:column;}
+  .log-header{padding:10px 14px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center;}
+  .log-header h2{font-size:13px; margin:0; font-weight:600; color:var(--muted); letter-spacing:.04em; text-transform:uppercase;}
+  .log-header button{padding:4px 10px; font-size:11px;}
+  .log-list{flex:1; overflow-y:auto; padding:8px 10px; font-family:'SF Mono',Consolas,monospace; font-size:11.5px;}
+  .log-entry{padding:5px 8px; border-radius:4px; margin-bottom:3px; display:flex; gap:8px; border-left:2px solid var(--border);}
+  .log-entry .t{color:var(--muted); flex-shrink:0;}
+  .log-entry.ok{border-left-color:var(--target);}
+  .log-entry.alert{border-left-color:var(--red); background:rgba(255,91,91,.08);}
+  .log-entry.info{border-left-color:var(--person);}
+
+  footer{
+    padding:9px 20px; background:var(--panel); border-top:1px solid var(--border);
+    display:flex; justify-content:space-between; font-size:11.5px; color:var(--muted);
+  }
+  footer .storage{display:flex; align-items:center; gap:6px;}
+  footer .storage .dot{width:7px;height:7px;border-radius:50%;background:var(--target);}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="title"><span class="dot"></span> AI TASK MONITOR — Auto Task Assignment</div>
+  <div class="nav-links">
+    <a href="/" class="nav-link">🛰 Mission Control Dashboard</a>
+    <span class="status" id="modelStatus">Loading models…</span>
+  </div>
+</header>
+
+<main>
+  <div class="panel cam-panel">
+    <div class="cam-header">
+      <h2>Live Camera</h2>
+      <div class="legend">
+        <span><span class="swatch" style="background:#5b8cff"></span> Person</span>
+        <span><span class="swatch" style="background:#3ddc84"></span> Task object</span>
+        <span><span class="swatch" style="background:#f4c542"></span> Other objects</span>
+      </div>
+      <span class="status" id="fpsLabel" style="margin-left:14px;">-- fps</span>
+    </div>
+    <div class="cam-stage" id="stage">
+      <div class="placeholder" id="placeholder">Click "Start Camera" to begin.<br/>Show a bottle, cup, phone, book, remote, banana, apple, or ball — a task will be assigned automatically.<br/>Runs fully on-device — nothing leaves your machine.<br/><br/><b style="color:#f4c542">Note:</b> if opened directly as a file, the browser will block the camera. Serve it via <code>python3 -m http.server</code> or Flask dashboard and open <code>http://localhost:8554/task-monitor</code> instead.</div>
+      <video id="video" autoplay muted playsinline></video>
+      <canvas id="overlay"></canvas>
+    </div>
+    <div class="controls">
+      <button class="primary" id="startBtn" disabled>Start Camera</button>
+      <button class="danger" id="stopBtn" disabled>Stop</button>
+      <button id="resetBtn">Skip / New Task</button>
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);margin-left:6px;">
+        <input type="checkbox" id="voiceToggle" checked/> 🔊 Voice feedback
+      </label>
+    </div>
+  </div>
+
+  <div class="side">
+    <div class="panel task-panel">
+      <h2>Current Task</h2>
+      <div class="task-name" id="taskName">Waiting for an object…</div>
+      <div class="task-instruction" id="taskInstruction">Show one of the supported objects to the camera and a task will be assigned automatically.</div>
+      <div class="stat-row"><span>State</span><span id="statePill" class="state-pill state-idle">IDLE</span></div>
+      <div class="stat-row"><span>Camera</span><span class="v" id="statCam" style="color:var(--muted)">Offline</span></div>
+      <div class="stat-row"><span>People in frame</span><span class="v" id="statPersonCount">0</span></div>
+    </div>
+    <div class="panel tracking-panel">
+      <h2>Object Route</h2>
+      <div class="tracking-meta">
+        <span>Object</span><b id="trackedObject">Waiting</b>
+        <span>Track ID</span><b id="trackedObjectId">--</b>
+        <span>Step</span><b id="trackedStep">0 / 4</b>
+        <span>Status</span><b id="trackingStatus">Waiting for object</b>
+      </div>
+      <div class="target-sequence" id="targetSequence"></div>
+    </div>
+
+    <div id="alertBanner" class="banner alert">
+      <div class="b-title" id="alertTitle">🚨 PROCEDURE VIOLATION</div>
+      <div class="b-detail" id="alertDetail"></div>
+    </div>
+    <div id="correctBanner" class="banner correct">
+      <div class="b-title" id="correctTitle">🟢 CORRECT ACTION</div>
+      <div class="b-detail" id="correctDetail"></div>
+    </div>
+
+    <div class="panel log-panel">
+      <div class="log-header">
+        <h2>Event Log — Local Storage</h2>
+        <div>
+          <button id="exportBtn">Export</button>
+          <button id="clearBtn">Clear</button>
+        </div>
+      </div>
+      <div class="log-list" id="logList"></div>
+    </div>
+  </div>
+</main>
+
+<footer>
+  <div class="storage"><span class="dot"></span> Local Storage Active — logs persist across reloads, no server, no internet after first load</div>
+  <div id="clock"></div>
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675469404/pose.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2.1.3/dist/pose-detection.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/face-landmarks-detection@1.0.6/dist/face-landmarks-detection.min.js"></script>
+
+<script>
+// ----------------------------------------------------------------------
+// CONFIG
+// ----------------------------------------------------------------------
+const TASKS = {
+  'bottle':      {label:'Drink Water',        instruction:'Pick up the water bottle, then place it down away from you when done.'},
+  'hand':        {label:'Move Your Hand',     instruction:'Move your hand through the targets and hold it inside each target for three seconds.'},
+  'cup':         {label:'Take a Sip',          instruction:'Pick up the cup and take a sip, then set it back down.'},
+  'cell phone':  {label:'Check Your Phone',    instruction:'Pick up your phone, check it, then set it back down.'},
+  'book':        {label:'Read a Page',         instruction:'Pick up the book and read a page, then place it back down.'},
+  'remote':      {label:'Use the Remote',      instruction:'Pick up the remote, then place it back down.'},
+  'banana':      {label:'Eat the Banana',      instruction:'Pick up the banana, then set it down when finished.'},
+  'apple':       {label:'Eat the Apple',       instruction:'Pick up the apple, then set it down when finished.'},
+  'sports ball': {label:'Play with the Ball',  instruction:'Pick up the ball, then set it down when finished.'}
+};
+const PERSON_COLOR = '#5b8cff';
+const TARGET_COLOR = '#3ddc84';
+const OBJECT_COLOR = '#f4c542';
+
+const WRIST_DIST_BASE = 70;           // px baseline @ reference person scale (used with adaptive scaling below)
+const HOLD_CONSEC_FRAMES = 6;         // consecutive near-frames to confirm "picked up"
+const RELEASE_CONSEC_FRAMES = 6;      // consecutive away-frames (object re-seen, away from hand) to confirm "put down"
+const OBJECT_MIN_SCORE = 0.55;        // filter out low-confidence object detections (was using coco-ssd default ~0.5)
+const KEYPOINT_MIN_SCORE = 0.4;       // slightly stricter than before, reduces ghost/jittery joints
+const KEYPOINT_SMOOTHING = 0.5;       // 0 = no smoothing, higher = smoother but more lag (EMA factor)
+const OCCLUSION_GRACE_MS = 1500;      // how long we keep "remembering" an object's last position while it's hidden (e.g. behind a hand)
+const WRONG_OBJECT_COOLDOWN_MS = 4000;
+const NEXT_TASK_DELAY_MS = 3000;      // pause after completion before assigning a new task
+const LOG_KEY = 'ai_task_monitor_log_v1';
+const MAX_ON_SCREEN_LOG = 8;
+const PERSON_CONFIRM_FRAMES = 4;
+const TARGET_COLORS = ['#3ddc84', '#f4c542', '#ff5b5b', '#5b8cff'];
+const TARGET_NAMES = ['GREEN', 'YELLOW', 'RED', 'BLUE'];
+const TRACK_MAX_MISSED = 12;
+const TRACK_MATCH_DISTANCE = 180;
+const TARGET_DWELL_MS = 3000;
+const MOVEMENT_HISTORY_LIMIT = 500;
+const TRACKABLE_OBJECT_CLASSES = ['bottle', 'cell phone', 'book', 'cup', 'banana', 'apple', 'remote', 'sports ball'];
+const HAND_FALLBACK_DELAY_MS = 15000; // 15 seconds continuous no-object detection before hand fallback
+let lastObjectSeenTime = Date.now();
+
+// COCO/MoveNet 17-keypoint skeleton edges
+const POSE_EDGES = [
+  [5,7],[7,9],[6,8],[8,10],[5,6],
+  [5,11],[6,12],[11,12],
+  [11,13],[13,15],[12,14],[14,16]
+];
+
+// ----------------------------------------------------------------------
+// TASK STATE MACHINE
+// ----------------------------------------------------------------------
+const T_IDLE = 'IDLE', T_WAITING = 'WAITING', T_HOLDING = 'HOLDING', T_COMPLETED = 'COMPLETED';
+let taskState = T_IDLE;
+let currentTaskClass = null;
+let lastTaskClass = null;
+let holdCounter = 0;
+let releaseCounter = 0;
+let nextTaskAt = 0;
+let lastWrongAlertAt = 0;
+
+// multi-person debounce tracking
+let personConfirmed = 0;
+let personCandidateValue = 0;
+let personCandidateFrames = 0;
+
+// object memory (survives brief occlusion, e.g. object hidden behind a hand)
+const objectMemory = {}; // class -> {bbox, lastSeen}
+
+// smoothed keypoints (EMA), keyed by keypoint index, for the primary tracked pose
+let smoothedKeypoints = null;
+let smoothedFaceKeypoints = null;
+let trackedObject = null;
+let nextTrackId = 1;
+let routeTargets = [];
+let currentTargetIndex = -1;
+let targetDwellStartedAt = 0;
+let lastMovementStatus = 'Waiting for object';
+const movementHistory = [];
+
+// ----------------------------------------------------------------------
+// DOM
+// ----------------------------------------------------------------------
+const video = document.getElementById('video');
+const overlay = document.getElementById('overlay');
+const ctx = overlay.getContext('2d');
+const startBtn = document.getElementById('startBtn');
+const stopBtn = document.getElementById('stopBtn');
+const resetBtn = document.getElementById('resetBtn');
+const placeholder = document.getElementById('placeholder');
+const modelStatus = document.getElementById('modelStatus');
+const fpsLabel = document.getElementById('fpsLabel');
+const logList = document.getElementById('logList');
+const statCam = document.getElementById('statCam');
+const statePill = document.getElementById('statePill');
+const taskName = document.getElementById('taskName');
+const taskInstruction = document.getElementById('taskInstruction');
+const alertBanner = document.getElementById('alertBanner');
+const alertTitle = document.getElementById('alertTitle');
+const alertDetail = document.getElementById('alertDetail');
+const correctBanner = document.getElementById('correctBanner');
+const correctTitle = document.getElementById('correctTitle');
+const correctDetail = document.getElementById('correctDetail');
+const voiceToggle = document.getElementById('voiceToggle');
+const trackedObjectLabel = document.getElementById('trackedObject');
+const trackedObjectIdLabel = document.getElementById('trackedObjectId');
+const trackedStepLabel = document.getElementById('trackedStep');
+const trackingStatusLabel = document.getElementById('trackingStatus');
+const targetSequence = document.getElementById('targetSequence');
+
+let objectModel = null, poseModel = null, faceModel = null, stream = null, running = false, rafId = null;
+
+// ----------------------------------------------------------------------
+// LOCAL LOG
+// ----------------------------------------------------------------------
+function nowStr(){
+  const d = new Date();
+  return d.toLocaleTimeString('en-GB', {hour12:false}) + '.' + String(d.getMilliseconds()).padStart(3,'0');
+}
+function loadLog(){ try{ return JSON.parse(localStorage.getItem(LOG_KEY) || '[]'); }catch(e){ return []; } }
+function saveLog(entries){ localStorage.setItem(LOG_KEY, JSON.stringify(entries.slice(-500))); }
+function renderLog(){
+  const entries = loadLog();
+  logList.innerHTML = entries.slice().reverse().map(e =>
+    `<div class="log-entry ${e.type}"><span class="t">${e.t}</span><span>${e.msg}</span></div>`
+  ).join('');
+}
+function addLog(type, msg){
+  const entries = loadLog();
+  entries.push({t: nowStr(), type, msg});
+  saveLog(entries);
+  renderLog();
+}
+renderLog();
+
+document.getElementById('clearBtn').onclick = () => { localStorage.removeItem(LOG_KEY); renderLog(); };
+document.getElementById('exportBtn').onclick = () => {
+  const blob = new Blob([JSON.stringify(loadLog(), null, 2)], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'task-monitor-log.json'; a.click();
+  URL.revokeObjectURL(url);
+};
+setInterval(() => { document.getElementById('clock').textContent = new Date().toLocaleString(); }, 1000);
+
+// ----------------------------------------------------------------------
+// SPEECH SYNTHESIS MANAGER (Prevents audio engine locking/freezing)
+// ----------------------------------------------------------------------
+let lastSpokenText = '';
+let lastSpokenTime = 0;
+let isSpeaking = false;
+
+function speak(text){
+  if(!voiceToggle.checked || !('speechSynthesis' in window)) return;
+  const now = Date.now();
+  if(text === lastSpokenText && (now - lastSpokenTime) < 3000) return;
+  if((now - lastSpokenTime) < 1500 && isSpeaking) return;
+
+  lastSpokenText = text;
+  lastSpokenTime = now;
+
+  try {
+    speechSynthesis.cancel();
+    setTimeout(() => {
+      if(!voiceToggle.checked) return;
+      const utter = new SpeechSynthesisUtterance(text);
+      utter.rate = 0.95;
+      utter.pitch = 1.0;
+      utter.onstart = () => { isSpeaking = true; };
+      utter.onend = () => { isSpeaking = false; };
+      utter.onerror = () => { isSpeaking = false; };
+      speechSynthesis.speak(utter);
+    }, 60);
+  } catch(e) {
+    console.warn('Speech synthesis error:', e);
+  }
+}
+
+let alertTimer = null, correctTimer = null;
+function showAlert(title, detail, speechText, duration=3500){
+  alertTitle.textContent = '🚨 ' + title;
+  alertDetail.textContent = detail;
+  correctBanner.classList.remove('show');
+  alertBanner.classList.add('show');
+  addLog('alert', `${title} — ${detail}`);
+  speak(speechText || title);
+  clearTimeout(alertTimer);
+  alertTimer = setTimeout(() => alertBanner.classList.remove('show'), duration);
+}
+function showCorrect(title, detail, speechText, duration=3000){
+  correctTitle.textContent = '🟢 ' + title;
+  correctDetail.textContent = detail;
+  alertBanner.classList.remove('show');
+  correctBanner.classList.add('show');
+  addLog('ok', `${title} — ${detail}`);
+  speak(speechText || title);
+  clearTimeout(correctTimer);
+  correctTimer = setTimeout(() => correctBanner.classList.remove('show'), duration);
+}
+
+// ----------------------------------------------------------------------
+// TASK UI
+// ----------------------------------------------------------------------
+function updateTaskUI(){
+  statePill.textContent = taskState;
+  statePill.className = 'state-pill ' + (
+    taskState === T_IDLE ? 'state-idle' :
+    taskState === T_WAITING ? 'state-waiting' :
+    taskState === T_HOLDING ? 'state-holding' : 'state-completed'
+  );
+  if(taskState === T_IDLE){
+    taskName.textContent = 'Waiting for an object…';
+    taskInstruction.textContent = 'Show one of the supported objects to the camera and a task will be assigned automatically.';
+  } else {
+    const def = TASKS[currentTaskClass];
+    taskName.textContent = def.label;
+    taskInstruction.textContent = def.instruction;
+  }
+}
+updateTaskUI();
+
+function assignNewTask(eligibleClasses){
+  let pool = eligibleClasses;
+  if(pool.length > 1 && lastTaskClass) pool = pool.filter(c => c !== lastTaskClass);
+  if(pool.length === 0) pool = eligibleClasses;
+  const chosen = pool[Math.floor(Math.random() * pool.length)];
+  currentTaskClass = chosen;
+  lastTaskClass = chosen;
+  taskState = T_WAITING;
+  holdCounter = 0; releaseCounter = 0;
+  updateTaskUI();
+  const def = TASKS[chosen];
+  addLog('info', `New task assigned: ${def.label} (${chosen})`);
+  speak('New task: ' + def.label);
+}
+
+resetBtn.onclick = () => {
+  resetRoute();
+  currentTaskClass = null;
+  taskState = T_IDLE;
+  holdCounter = 0; releaseCounter = 0;
+  nextTaskAt = 0;
+  updateTaskUI();
+  addLog('info', 'Task skipped by operator — waiting for a new object.');
+};
+
+// ----------------------------------------------------------------------
+// MODEL LOADING (mobilenet_v2 full — higher accuracy than lite)
+// ----------------------------------------------------------------------
+let isBlazePose = false;
+async function loadModels(){
+  modelStatus.textContent = 'Loading models (high-accuracy mode)…';
+  objectModel = await cocoSsd.load({base:'mobilenet_v2'});
+  try {
+    faceModel = await faceLandmarksDetection.createDetector(
+      faceLandmarksDetection.SupportedModels.MediaPipeFaceMesh,
+      {runtime:'mediapipe', solutionPath:'https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh', refineLandmarks:true}
+    );
+  } catch(e) {
+    faceModel = null;
+    console.warn('Face landmark model unavailable; continuing with pose overlay.', e);
+  }
+  try {
+    poseModel = await poseDetection.createDetector(poseDetection.SupportedModels.BlazePose, {
+      runtime: 'mediapipe',
+      solutionPath: 'https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675469404',
+      modelType: 'full'
+    });
+    isBlazePose = true;
+    addLog('info', 'BlazePose (33 3D keypoints) loaded for high-precision anatomical tracking.');
+  } catch(e) {
+    console.warn('BlazePose load fallback to MoveNet Thunder:', e);
+    try {
+      poseModel = await poseDetection.createDetector(poseDetection.SupportedModels.BlazePose, {
+        runtime: 'tfjs',
+        modelType: 'full'
+      });
+      isBlazePose = true;
+      addLog('info', 'BlazePose TFJS (33 keypoints) loaded for high-precision tracking.');
+    } catch(e2) {
+      poseModel = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, {
+        modelType: poseDetection.movenet.modelType.SINGLEPOSE_THUNDER
+      });
+      isBlazePose = false;
+      addLog('info', 'MoveNet SinglePose Thunder loaded for skeleton tracking.');
+    }
+  }
+  modelStatus.textContent = 'Models ready (high-accuracy) — offline capable';
+  startBtn.disabled = false;
+}
+loadModels().catch(err => {
+  modelStatus.textContent = 'Model load failed — needs internet for first-time load';
+  addLog('alert', 'Model load error: ' + err.message);
+});
+
+if(!window.isSecureContext){
+  placeholder.innerHTML = '<b style="color:#ff5b5b">Camera will not work from a file:// page.</b><br/><br/>' +
+    'Serve this file locally instead:<br/>' +
+    '<code>python3 -m http.server 8000</code><br/>then open<br/>' +
+    '<code>http://localhost:8000/task_monitor.html</code>';
+  addLog('alert', 'Page is not a secure context (file://). Camera access will be blocked until served over localhost or https.');
+}
+
+// ----------------------------------------------------------------------
+// CAMERA
+// ----------------------------------------------------------------------
+function cameraErrorMessage(err){
+  if(!window.isSecureContext){
+    return 'Camera blocked: this page must be served from http://localhost or https:// — opening the file directly (file://) is not allowed by the browser.';
+  }
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+    return 'This browser does not support camera access. Try current Chrome or Firefox.';
+  }
+  switch(err.name){
+    case 'NotAllowedError': return 'Camera permission was denied. Click the camera icon in the address bar and allow access, then click Start Camera again.';
+    case 'NotFoundError': return 'No camera device was found. Check that a webcam is connected.';
+    case 'NotReadableError': return 'Camera is already in use by another app — close it and retry.';
+    case 'OverconstrainedError': return 'Requested camera resolution not supported by your device.';
+    default: return err.message || 'Unknown camera error.';
+  }
+}
+
+async function startCamera(){
+  try{
+    // Higher resolution for better detection accuracy on smaller objects
+    stream = await navigator.mediaDevices.getUserMedia({video:{width:1280, height:720}, audio:false});
+    video.srcObject = stream;
+    await video.play();
+    placeholder.style.display = 'none';
+    resizeOverlay();
+    running = true;
+    statCam.textContent = 'Online'; statCam.style.color = 'var(--target)';
+    startBtn.disabled = true; stopBtn.disabled = false;
+    addLog('info', 'Camera started (1280x720, high-accuracy mode).');
+    detectLoop();
+  }catch(err){
+    const msg = cameraErrorMessage(err);
+    addLog('alert', 'Camera access failed: ' + msg);
+    placeholder.style.display = 'block';
+    placeholder.textContent = msg;
+  }
+}
+function stopCamera(){
+  running = false;
+  if(rafId) cancelAnimationFrame(rafId);
+  if(stream) stream.getTracks().forEach(t => t.stop());
+  smoothedKeypoints = null;
+  smoothedFaceKeypoints = null;
+  ctx.clearRect(0,0,overlay.width, overlay.height);
+  placeholder.style.display = 'block';
+  placeholder.textContent = 'Camera stopped.';
+  statCam.textContent = 'Offline'; statCam.style.color = 'var(--muted)';
+  startBtn.disabled = false; stopBtn.disabled = true;
+  addLog('info', 'Camera stopped.');
+}
+startBtn.onclick = startCamera;
+stopBtn.onclick = stopCamera;
+window.addEventListener('resize', resizeOverlay);
+
+// ----------------------------------------------------------------------
+// GEOMETRY & COORDINATE MAPPING
+// ----------------------------------------------------------------------
+function resizeOverlay(){
+  const rect = document.getElementById('stage').getBoundingClientRect();
+  overlay.width = Math.max(1, Math.round(rect.width));
+  overlay.height = Math.max(1, Math.round(rect.height));
+}
+
+function sourceToOverlay(point){
+  if(!point) return {x:0, y:0};
+  const sourceWidth = video.videoWidth || 1280;
+  const sourceHeight = video.videoHeight || 720;
+  const scale = Math.min(overlay.width / sourceWidth, overlay.height / sourceHeight);
+  const offsetX = (overlay.width - sourceWidth * scale) / 2;
+  const offsetY = (overlay.height - sourceHeight * scale) / 2;
+  return {
+    x: offsetX + point.x * scale,
+    y: offsetY + point.y * scale
+  };
+}
+
+function boxToOverlay(box){
+  const topLeft = sourceToOverlay({x:box[0], y:box[1]});
+  const bottomRight = sourceToOverlay({x:box[0] + box[2], y:box[1] + box[3]});
+  return [topLeft.x, topLeft.y, Math.max(1, bottomRight.x - topLeft.x), Math.max(1, bottomRight.y - topLeft.y)];
+}
+
+function mapKeypoints(keypoints){
+  return keypoints.map(k => ({...k, ...sourceToOverlay(k)}));
+}
+
+function drawMirroredText(text, screenX, screenY, font='12px monospace', color='#e8edf2', align='left', baseline='top'){
+  ctx.save();
+  const canvasX = overlay.width - screenX;
+  ctx.translate(canvasX, screenY);
+  ctx.scale(-1, 1);
+  ctx.font = font;
+  ctx.fillStyle = color;
+  ctx.textAlign = align;
+  ctx.textBaseline = baseline;
+  ctx.fillText(text, 0, 0);
+  ctx.restore();
+}
+
+function bboxCenter(box){ return {x:box[0] + box[2] / 2, y:box[1] + box[3] / 2}; }
+function bboxIoU(a, b){
+  const x1 = Math.max(a[0], b[0]), y1 = Math.max(a[1], b[1]);
+  const x2 = Math.min(a[0] + a[2], b[0] + b[2]), y2 = Math.min(a[1] + a[3], b[1] + b[3]);
+  const intersection = Math.max(0, x2 - x1) * Math.max(0, y2 - y1);
+  return intersection / Math.max(a[2] * a[3] + b[2] * b[3] - intersection, 1);
+}
+
+function resetRoute(){
+  routeTargets = [];
+  currentTargetIndex = -1;
+  targetDwellStartedAt = 0;
+  trackedObject = null;
+  movementHistory.length = 0;
+  lastMovementStatus = 'Waiting for object';
+  targetSequence.innerHTML = '';
+  updateTrackingUI();
+}
+
+function generateTargets(){
+  const width = overlay.width, height = overlay.height;
+  const size = Math.max(64, Math.min(112, Math.round(Math.min(width, height) * 0.15)));
+  const margin = size * 0.8;
+  const positions = [];
+  for(let i = 0; i < TARGET_NAMES.length; i++){
+    let candidate = null;
+    for(let attempt = 0; attempt < 80; attempt++){
+      const x = margin + Math.random() * Math.max(1, width - size - margin * 2);
+      const y = margin + Math.random() * Math.max(1, height - size - margin * 2);
+      if(positions.every(p => Math.hypot(p.x - x, p.y - y) >= size * 1.8)){
+        candidate = {x, y}; break;
+      }
+    }
+    if(!candidate) candidate = [{x:margin,y:margin},{x:width-size-margin,y:margin},{x:margin,y:height-size-margin},{x:width-size-margin,y:height-size-margin}][i];
+    positions.push(candidate);
+  }
+  routeTargets = positions.map((p, index) => ({...p, size, index, color:TARGET_COLORS[index], name:TARGET_NAMES[index]}));
+  currentTargetIndex = 0;
+  targetDwellStartedAt = 0;
+  targetSequence.innerHTML = routeTargets.map((target, index) => `<div class="target-step" data-target="${index}"><span class="target-chip" style="background:${target.color}"></span>TARGET ${index + 1} ${target.name} <span class="target-state">WAITING</span></div>`).join('');
+  updateTrackingUI();
+}
+
+function drawTargets(){
+  routeTargets.forEach((target, index) => {
+    const active = index === currentTargetIndex;
+    const completed = index < currentTargetIndex;
+    ctx.save();
+    ctx.strokeStyle = completed ? '#3ddc84' : target.color;
+    ctx.fillStyle = completed ? 'rgba(61,220,132,.12)' : `rgba(0,0,0,.18)`;
+    ctx.lineWidth = active ? 3 : 2;
+    ctx.setLineDash(active ? [8, 5] : []);
+    ctx.fillRect(target.x, target.y, target.size, target.size);
+    ctx.strokeRect(target.x, target.y, target.size, target.size);
+    ctx.setLineDash([]);
+    ctx.restore();
+
+    // Calculate exact visual screen X position inside target box
+    const targetScreenX = overlay.width - target.x - target.size + 8;
+    const statusText = completed ? 'COMPLETED' : active ? 'CURRENT' : 'WAITING';
+    drawMirroredText(`TARGET ${index + 1}`, targetScreenX, target.y + 10, '600 12px monospace', target.color, 'left', 'top');
+    drawMirroredText(statusText, targetScreenX, target.y + target.size - 20, '10px monospace', target.color, 'left', 'top');
+  });
+}
+
+function updateTrackingUI(){
+  const hasTrack = !!trackedObject;
+  const nameMap = {'bottle': 'Water Bottle', 'cell phone': 'Phone', 'book': 'Book', 'hand': 'Hand'};
+  const displayName = hasTrack ? (nameMap[trackedObject.class] || trackedObject.class) : 'Waiting';
+  trackedObjectLabel.textContent = displayName;
+  trackedObjectIdLabel.textContent = hasTrack ? `#${String(trackedObject.id).padStart(2, '0')}` : '--';
+  trackedStepLabel.textContent = currentTargetIndex < 0 ? '0 / 4' : `${Math.min(currentTargetIndex + 1, 4)} / 4`;
+  const direction = hasTrack ? Math.round(Math.atan2(trackedObject.velocity.y, trackedObject.velocity.x) * 180 / Math.PI) : 0;
+  trackingStatusLabel.textContent = hasTrack ? `${lastMovementStatus} · ${Math.round(trackedObject.confidence * 100)}% · ${direction}°` : lastMovementStatus;
+  targetSequence.querySelectorAll('.target-step').forEach((element, index) => {
+    element.className = 'target-step ' + (index < currentTargetIndex ? 'done' : index === currentTargetIndex ? 'current' : '');
+    const state = element.querySelector('.target-state');
+    if(state) state.textContent = index < currentTargetIndex ? 'COMPLETED' : index === currentTargetIndex ? 'CURRENT' : 'WAITING';
+  });
+}
+
+function updateTrackedObject(detections){
+  const candidates = detections.filter(o => TRACKABLE_OBJECT_CLASSES.includes(o.class));
+  const now = performance.now();
+  if(candidates.length > 0) lastObjectSeenTime = Date.now();
+
+  let match = null;
+  if(trackedObject && trackedObject.class !== 'hand'){
+    match = candidates.filter(o => o.class === trackedObject.class).reduce((best, candidate) => {
+      const distance = Math.hypot(bboxCenter(candidate.bbox).x - trackedObject.center.x, bboxCenter(candidate.bbox).y - trackedObject.center.y);
+      const score = bboxIoU(candidate.bbox, trackedObject.bbox) * 500 - distance;
+      return !best || score > best.score ? {candidate, score} : best;
+    }, null);
+    if(match && match.score < -TRACK_MATCH_DISTANCE) match = null;
+  }
+
+  if(match){
+    const candidate = match.candidate;
+    const center = bboxCenter(candidate.bbox);
+    const dt = Math.max((now - trackedObject.lastTime) / 1000, 1 / 60);
+    trackedObject.velocity = {x:(center.x - trackedObject.center.x) / dt, y:(center.y - trackedObject.center.y) / dt};
+    trackedObject.bbox = candidate.bbox;
+    trackedObject.center = center;
+    trackedObject.confidence = candidate.score;
+    trackedObject.lastTime = now;
+    trackedObject.missed = 0;
+    trackedObject.lastSeen = true;
+  } else if(trackedObject && trackedObject.class !== 'hand' && trackedObject.missed < TRACK_MAX_MISSED){
+    const dt = Math.max((now - trackedObject.lastTime) / 1000, 1 / 60);
+    const shiftX = trackedObject.velocity.x * dt * 0.35;
+    const shiftY = trackedObject.velocity.y * dt * 0.35;
+    trackedObject.bbox = [trackedObject.bbox[0] + shiftX, trackedObject.bbox[1] + shiftY, trackedObject.bbox[2], trackedObject.bbox[3]];
+    trackedObject.center = bboxCenter(trackedObject.bbox);
+    trackedObject.confidence *= 0.92;
+    trackedObject.lastTime = now;
+    trackedObject.missed++;
+    trackedObject.lastSeen = false;
+  } else if(candidates.length){
+    const candidate = candidates[0];
+    const nameMap = {'bottle': 'Water Bottle', 'cell phone': 'Phone', 'book': 'Book'};
+    const label = nameMap[candidate.class] || candidate.class;
+    trackedObject = {id:nextTrackId++, class:candidate.class, bbox:candidate.bbox, center:bboxCenter(candidate.bbox), velocity:{x:0,y:0}, confidence:candidate.score, lastTime:now, missed:0, lastSeen:true};
+    currentTaskClass = candidate.class;
+    taskState = T_WAITING;
+    updateTaskUI();
+    if(currentTargetIndex < 0) generateTargets();
+    lastMovementStatus = `${label} acquired — move to Target 1`;
+    speak(`${label} acquired. Move ${label} to Target 1.`);
+  } else if(trackedObject && trackedObject.class !== 'hand' && trackedObject.missed >= TRACK_MAX_MISSED){
+    lastMovementStatus = 'Object lost';
+    trackedObject = null;
+  }
+  updateTrackingUI();
+}
+
+function updateHandFallback(keypoints){
+  if(trackedObject && trackedObject.class !== 'hand') return;
+  // ONLY trigger hand fallback if NO object has been detected for 15 full seconds (15000ms)
+  if(Date.now() - lastObjectSeenTime < HAND_FALLBACK_DELAY_MS) return;
+
+  const wristIndices = isBlazePose ? [15, 16] : [9, 10];
+  const wrist = wristIndices.map(index => keypoints[index]).find(point => point && point.score > KEYPOINT_MIN_SCORE);
+  if(!wrist) return;
+  const size = Math.max(36, Math.min(110, Math.hypot(wrist.x, wrist.y) * 0.08));
+  const bbox = [wrist.x - size / 2, wrist.y - size / 2, size, size];
+  if(!trackedObject || trackedObject.class !== 'hand'){
+    trackedObject = {id:nextTrackId++, class:'hand', bbox, center:{x:wrist.x,y:wrist.y}, velocity:{x:0,y:0}, confidence:wrist.score, lastTime:performance.now(), missed:0, lastSeen:true};
+    currentTaskClass = 'hand';
+    taskState = T_WAITING;
+    updateTaskUI();
+    if(currentTargetIndex < 0) generateTargets();
+    lastMovementStatus = 'No object for 15s — Hand mode active';
+    speak('No object detected for 15 seconds. Hand movement mode activated.');
+    updateTrackingUI();
+  }
+}
+
+function validateTargetMovement(){
+  if(!trackedObject || currentTargetIndex < 0 || currentTargetIndex >= routeTargets.length || !routeTargets.length) return;
+  const now = performance.now();
+  const displayCenter = sourceToOverlay(trackedObject.center);
+  const entered = routeTargets.findIndex(target => displayCenter.x >= target.x && displayCenter.x <= target.x + target.size && displayCenter.y >= target.y && displayCenter.y <= target.y + target.size);
+  const previous = trackedObject.previousTarget;
+  if(entered !== previous){
+    trackedObject.previousTarget = entered;
+    trackedObject.targetEntered = entered;
+    trackedObject.targetExited = previous;
+    movementHistory.push({objectId:trackedObject.id, timestamp:Date.now(), x:trackedObject.center.x, y:trackedObject.center.y, bbox:[...trackedObject.bbox], currentTarget:currentTargetIndex, previousTarget:previous, direction:Math.atan2(trackedObject.velocity.y, trackedObject.velocity.x), targetEntered:entered, targetExited:previous, correct:entered === currentTargetIndex});
+    if(movementHistory.length > MOVEMENT_HISTORY_LIMIT) movementHistory.shift();
+  }
+  if(entered === currentTargetIndex){
+    if(!targetDwellStartedAt) targetDwellStartedAt = now;
+    const dwellMs = now - targetDwellStartedAt;
+    const dwellSeconds = Math.min(3, Math.floor(dwellMs / 1000));
+    lastMovementStatus = trackedObject.lastSeen ? `Placed correctly · ${dwellSeconds}/3s` : `Tracking placement · ${dwellSeconds}/3s`;
+    if(trackedObject.lastSeen && dwellMs >= TARGET_DWELL_MS){
+      const completedStep = currentTargetIndex + 1;
+      const nextStep = completedStep + 1;
+      currentTargetIndex++;
+      targetDwellStartedAt = 0;
+      if(currentTargetIndex >= routeTargets.length){
+        currentTargetIndex = routeTargets.length;
+        lastMovementStatus = 'Task completed';
+        showCorrect('TASK COMPLETED', 'Object successfully reached all target locations.', 'Task completed! Excellent work.', 5000);
+      } else {
+        lastMovementStatus = `Target ${completedStep} completed`;
+        showCorrect(`TARGET ${completedStep} COMPLETED`, `Now move object to Target ${nextStep}.`, `Target ${completedStep} completed. Now move to Target ${nextStep}.`);
+      }
+    }
+  } else if(entered === previous && previous < currentTargetIndex){
+    targetDwellStartedAt = 0;
+    lastMovementStatus = `Target ${previous + 1} completed · Move to Target ${currentTargetIndex + 1}`;
+  } else if(entered >= 0){
+    targetDwellStartedAt = 0;
+    lastMovementStatus = entered > currentTargetIndex ? `Wrong movement: Target ${entered + 1} entered` : `Wrong target: Target ${entered + 1}`;
+    if(Date.now() - lastWrongAlertAt > WRONG_OBJECT_COOLDOWN_MS){
+      lastWrongAlertAt = Date.now();
+      showAlert('PROCEDURE STEP MISSED', `Please complete Target ${currentTargetIndex + 1} first before moving to Target ${entered + 1}.`, `Please complete Target ${currentTargetIndex + 1} first before moving to the next target.`);
+    }
+  } else if(previous === currentTargetIndex){
+    targetDwellStartedAt = 0;
+    lastMovementStatus = 'Step in progress';
+  }
+  updateTrackingUI();
+}
+
+function drawFaceLandmarks(face, ctx){
+  if(!face || !face.keypoints || face.keypoints.length < 400) return;
+  const raw = face.keypoints;
+  if(!smoothedFaceKeypoints || smoothedFaceKeypoints.length !== raw.length){
+    smoothedFaceKeypoints = raw.map(k => ({x:k.x, y:k.y, score:k.score}));
+  }
+
+  // Distance-Adaptive EMA Smoothing:
+  // Calculate average displacement delta across key landmarks
+  const refIndex = 1; // nose tip
+  const prevRef = smoothedFaceKeypoints[refIndex] || raw[refIndex];
+  const delta = Math.hypot(raw[refIndex].x - prevRef.x, raw[refIndex].y - prevRef.y);
+  // High motion / close zoom -> alpha ~ 0.75 (zero lag), Stationary -> alpha ~ 0.20 (zero jitter)
+  const alpha = Math.max(0.20, Math.min(0.85, delta / 12));
+
+  smoothedFaceKeypoints = raw.map((k, i) => {
+    const previous = smoothedFaceKeypoints[i];
+    const confidence = typeof k.score === 'number' ? k.score : 1;
+    if(confidence < 0.35) return previous;
+    return {
+      x: previous.x * (1 - alpha) + k.x * alpha,
+      y: previous.y * (1 - alpha) + k.y * alpha,
+      score: confidence
+    };
+  });
+
+  const points = mapKeypoints(smoothedFaceKeypoints);
+
+  const drawPath = (indices, close=false) => {
+    ctx.beginPath();
+    indices.forEach((index, position) => position ? ctx.lineTo(points[index].x, points[index].y) : ctx.moveTo(points[index].x, points[index].y));
+    if(close) ctx.closePath();
+    ctx.stroke();
+  };
+
+  ctx.save();
+  ctx.shadowBlur = 4;
+  ctx.shadowColor = 'rgba(62, 207, 214, 0.6)';
+
+  // 1. FACE OVAL CONTOUR
+  ctx.lineWidth = 1.2;
+  ctx.strokeStyle = 'rgba(62, 207, 214, 0.75)';
+  const faceOval = [10,338,297,332,284,251,389,356,454,323,361,288,397,365,379,378,400,377,152,148,176,149,150,136,172,58,132,93,234,127,162,21,54,103,67,109];
+  drawPath(faceOval, true);
+
+  // 2. EYE LANDMARKS & PUPIL TARGET INDICATORS
+  ctx.lineWidth = 1.2;
+  ctx.strokeStyle = '#3ecfd6';
+  const leftEyeIndices = [33, 160, 158, 133, 153, 144];
+  const rightEyeIndices = [362, 385, 387, 263, 373, 380];
+  drawPath(leftEyeIndices, true);
+  drawPath(rightEyeIndices, true);
+
+  // Calculate eye centroids for pupil crosshairs
+  const getCentroid = (indices) => {
+    let sx = 0, sy = 0;
+    indices.forEach(idx => { sx += points[idx].x; sy += points[idx].y; });
+    return { x: sx / indices.length, y: sy / indices.length };
+  };
+  const leftPupil = getCentroid(leftEyeIndices);
+  const rightPupil = getCentroid(rightEyeIndices);
+  const eyeDistance = Math.hypot(leftPupil.x - rightPupil.x, leftPupil.y - rightPupil.y);
+  const pupilRadius = Math.max(1.5, Math.min(3.5, eyeDistance * 0.04));
+
+  [leftPupil, rightPupil].forEach(pupil => {
+    ctx.beginPath();
+    ctx.arc(pupil.x, pupil.y, pupilRadius, 0, Math.PI * 2);
+    ctx.fillStyle = '#ffffff';
+    ctx.fill();
+    ctx.strokeStyle = '#00f3ff';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  });
+
+  // 3. MOUTH CONTOUR & SMILE DETECTION
+  const outerLips = [61,185,40,39,37,0,267,269,270,409,291,375,321,405,314,17,84,181,91,146];
+  const mouthLeft = points[61], mouthRight = points[291];
+  const lipTop = points[0], lipBottom = points[17];
+  const faceLeft = points[234], faceRight = points[454];
+
+  const mouthWidth = Math.hypot(mouthRight.x - mouthLeft.x, mouthRight.y - mouthLeft.y);
+  const mouthHeight = Math.hypot(lipBottom.y - lipTop.y, lipBottom.x - lipTop.x);
+  const faceWidth = Math.hypot(faceRight.x - faceLeft.x, faceRight.y - faceLeft.y);
+
+  const lipCenterY = (lipTop.y + lipBottom.y) / 2;
+  const cornerLift = lipCenterY - (mouthLeft.y + mouthRight.y) / 2;
+  const smileRatio = mouthWidth / Math.max(faceWidth, 1);
+  const isSmiling = smileRatio > 0.38 || cornerLift > 2.5;
+
+  ctx.strokeStyle = isSmiling ? '#3ddc84' : '#3ecfd6';
+  ctx.lineWidth = isSmiling ? 1.8 : 1.2;
+  drawPath(outerLips, true);
+
+  // HUD Expression Badge
+  const HUD_Y = points[10].y - 18;
+  const HUD_X = points[1].x;
+  drawMirroredText(isSmiling ? 'EXPRESSION: SMILE 😀' : 'EXPRESSION: NEUTRAL', HUD_X, HUD_Y, '600 11px monospace', isSmiling ? '#3ddc84' : '#8493a3', 'center', 'bottom');
+
+  ctx.restore();
+}
+
+function pointToBoxDistance(px, py, bbox){
+  const [x, y, w, h] = bbox;
+  const cx = Math.max(x, Math.min(px, x + w));
+  const cy = Math.max(y, Math.min(py, y + h));
+  return Math.hypot(px - cx, py - cy);
+}
+
+// ----------------------------------------------------------------------
+// REFERENCE-STYLE FULL BODY TRACKER
+// ----------------------------------------------------------------------
+function drawReferenceBody(kps, ctx, isBlazePose) {
+  const index = blazeIndex => isBlazePose ? blazeIndex : ({0:0, 2:1, 5:2, 7:3, 8:4, 11:5, 12:6, 13:7, 14:8, 15:9, 16:10, 23:11, 24:12, 25:13, 26:14, 27:15, 28:16}[blazeIndex]);
+  const point = blazeIndex => { const k = kps[index(blazeIndex)]; return k && (typeof k.score !== 'number' || k.score >= 0.22) ? k : null; };
+  const head=point(0), leftEar=point(7), rightEar=point(8), leftShoulder=point(11), rightShoulder=point(12), leftElbow=point(13), rightElbow=point(14), leftWrist=point(15), rightWrist=point(16), leftHip=point(23), rightHip=point(24), leftKnee=point(25), rightKnee=point(26), leftAnkle=point(27), rightAnkle=point(28);
+
+  // Compute dynamic scale based on shoulder or ear distance
+  let refSpan = 120;
+  if(leftShoulder && rightShoulder) refSpan = Math.hypot(leftShoulder.x - rightShoulder.x, leftShoulder.y - rightShoulder.y);
+  else if(leftHip && rightHip) refSpan = Math.hypot(leftHip.x - rightHip.x, leftHip.y - rightHip.y);
+  const scale = Math.max(0.4, Math.min(2.5, refSpan / 140));
+
+  const boneWidth = Math.max(1.2, Math.min(3.8, 2.0 * scale));
+  const jointRadius = Math.max(2.0, Math.min(6.5, 3.2 * scale));
+
+  const pairs=[[leftShoulder,leftElbow,'#29d9ff'],[leftElbow,leftWrist,'#29d9ff'],[rightShoulder,rightElbow,'#29d9ff'],[rightElbow,rightWrist,'#29d9ff'],[leftHip,leftKnee,'#b6e632'],[leftKnee,leftAnkle,'#b6e632'],[rightHip,rightKnee,'#b6e632'],[rightKnee,rightAnkle,'#b6e632'],[leftShoulder,rightShoulder,'#3c8cff'],[leftHip,rightHip,'#a64cff'],[leftShoulder,leftHip,'#f3d629'],[rightShoulder,rightHip,'#f3d629']];
+  
+  ctx.save(); ctx.lineCap='round'; ctx.lineJoin='round'; ctx.lineWidth=boneWidth; ctx.shadowColor='#00eaff'; ctx.shadowBlur=6;
+  pairs.forEach(([a,b,color])=>{if(!a||!b)return;ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.strokeStyle=color;ctx.stroke();});
+  if(leftShoulder&&rightShoulder&&head){const neck={x:(leftShoulder.x+rightShoulder.x)/2,y:(leftShoulder.y+rightShoulder.y)/2};ctx.beginPath();ctx.moveTo(head.x,head.y);ctx.lineTo(neck.x,neck.y);ctx.strokeStyle='#f05bcf';ctx.stroke();}
+  if(head&&leftEar&&rightEar){const radius=Math.max(10,Math.hypot(leftEar.x-rightEar.x,leftEar.y-rightEar.y)*.9);ctx.beginPath();ctx.ellipse(head.x,head.y-radius*.2,radius*.72,radius,0,0,Math.PI*2);ctx.strokeStyle='rgba(240,91,207,.8)';ctx.lineWidth=1.4;ctx.stroke();}
+  [head,leftEar,rightEar,leftShoulder,rightShoulder,leftElbow,rightElbow,leftWrist,rightWrist,leftHip,rightHip,leftKnee,rightKnee,leftAnkle,rightAnkle].forEach(joint=>{if(!joint)return;ctx.beginPath();ctx.arc(joint.x,joint.y,joint===head?jointRadius*1.1:jointRadius,0,Math.PI*2);ctx.fillStyle='#f8fbff';ctx.fill();ctx.strokeStyle='#00eaff';ctx.lineWidth=1;ctx.stroke();});
+  if(isBlazePose)[[15,17],[15,19],[15,21],[16,18],[16,20],[16,22]].forEach(([wristIndex,fingerIndex])=>{const wrist=point(wristIndex),finger=point(fingerIndex);if(!wrist||!finger)return;ctx.beginPath();ctx.moveTo(wrist.x,wrist.y);ctx.lineTo(finger.x,finger.y);ctx.strokeStyle='rgba(41,217,255,.7)';ctx.lineWidth=1.2;ctx.stroke();ctx.beginPath();ctx.arc(finger.x,finger.y,Math.max(1.5, jointRadius*0.6),0,Math.PI*2);ctx.fillStyle='#fff';ctx.fill();});
+  ctx.restore();
+}
+
+// ----------------------------------------------------------------------
+// LEGACY ANATOMICAL RENDERER
+// ----------------------------------------------------------------------
+function drawAnatomicalSkeleton(kps, ctx, isBlazePose) {
+  function getPoint(idx) {
+    const k = kps[idx];
+    return (k && k.score >= KEYPOINT_MIN_SCORE) ? { x: k.x, y: k.y } : null;
+  }
+
+  const nose = getPoint(0);
+  const lEye = getPoint(isBlazePose ? 2 : 1);
+  const rEye = getPoint(isBlazePose ? 5 : 2);
+  const lEar = getPoint(isBlazePose ? 7 : 3);
+  const rEar = getPoint(isBlazePose ? 8 : 4);
+  const lShoulder = getPoint(isBlazePose ? 11 : 5);
+  const rShoulder = getPoint(isBlazePose ? 12 : 6);
+  const lElbow = getPoint(isBlazePose ? 13 : 7);
+  const rElbow = getPoint(isBlazePose ? 14 : 8);
+  const lWrist = getPoint(isBlazePose ? 15 : 9);
+  const rWrist = getPoint(isBlazePose ? 16 : 10);
+  const lHip = getPoint(isBlazePose ? 23 : 11);
+  const rHip = getPoint(isBlazePose ? 24 : 12);
+  const lKnee = getPoint(isBlazePose ? 25 : 13);
+  const rKnee = getPoint(isBlazePose ? 26 : 14);
+  const lAnkle = getPoint(isBlazePose ? 27 : 15);
+  const rAnkle = getPoint(isBlazePose ? 28 : 16);
+
+  ctx.save();
+
+  // Glow settings for futuristic blue X-Ray aesthetic
+  ctx.shadowColor = '#00f3ff';
+  ctx.shadowBlur = 12;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  // 1. ANATOMICAL HEAD & SKULL DOME
+  if (false && (nose || (lEye && rEye))) {
+    const headX = nose ? nose.x : (lEye.x + rEye.x) / 2;
+    const headY = nose ? nose.y : (lEye.y + rEye.y) / 2;
+    let headRadius = 26;
+    if (lShoulder && rShoulder) {
+      headRadius = Math.max(18, Math.min(50, Math.hypot(lShoulder.x - rShoulder.x, lShoulder.y - rShoulder.y) * 0.22));
+    }
+
+    // Skull Dome
+    ctx.beginPath();
+    ctx.ellipse(headX, headY - headRadius * 0.35, headRadius * 0.85, headRadius * 1.1, 0, 0, 2 * Math.PI);
+    ctx.strokeStyle = 'rgba(0, 229, 255, 0.85)';
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(0, 162, 255, 0.08)';
+    ctx.fill();
+
+    // Orbital Eye Sockets
+    if (lEye) {
+      ctx.beginPath();
+      ctx.arc(lEye.x, lEye.y, headRadius * 0.22, 0, 2 * Math.PI);
+      ctx.strokeStyle = '#00ffff';
+      ctx.lineWidth = 1.8;
+      ctx.stroke();
+      ctx.fillStyle = '#ffffff';
+      ctx.fill();
+    }
+    if (rEye) {
+      ctx.beginPath();
+      ctx.arc(rEye.x, rEye.y, headRadius * 0.22, 0, 2 * Math.PI);
+      ctx.strokeStyle = '#00ffff';
+      ctx.lineWidth = 1.8;
+      ctx.stroke();
+      ctx.fillStyle = '#ffffff';
+      ctx.fill();
+    }
+
+    // Jawline & Cervical Spine (Neck)
+    if (lShoulder && rShoulder) {
+      const neckBase = { x: (lShoulder.x + rShoulder.x) / 2, y: (lShoulder.y + rShoulder.y) / 2 };
+      ctx.beginPath();
+      ctx.moveTo(headX - headRadius * 0.6, headY + headRadius * 0.3);
+      ctx.lineTo(headX, headY + headRadius * 0.85);
+      ctx.lineTo(headX + headRadius * 0.6, headY + headRadius * 0.3);
+      ctx.strokeStyle = 'rgba(0, 243, 255, 0.7)';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.moveTo(headX, headY + headRadius * 0.85);
+      ctx.lineTo(neckBase.x, neckBase.y);
+      ctx.strokeStyle = '#3ecfd6';
+      ctx.lineWidth = 3.5;
+      ctx.stroke();
+    }
+  }
+
+  // 2. TORSO, SPINE COLUMN, RIBCAGE & PELVIS
+  let neckBase = null, pelvicCenter = null;
+  if (lShoulder && rShoulder) {
+    neckBase = { x: (lShoulder.x + rShoulder.x) / 2, y: (lShoulder.y + rShoulder.y) / 2 };
+  }
+  if (lHip && rHip) {
+    pelvicCenter = { x: (lHip.x + rHip.x) / 2, y: (lHip.y + rHip.y) / 2 };
+  }
+
+  if (neckBase && pelvicCenter) {
+    const spineLength = Math.hypot(pelvicCenter.x - neckBase.x, pelvicCenter.y - neckBase.y);
+    const shoulderWidth = lShoulder && rShoulder ? Math.hypot(lShoulder.x - rShoulder.x, lShoulder.y - rShoulder.y) : spineLength * 0.9;
+
+    // Segmented Vertebral Spine Column (10 Disks)
+    const numVertebrae = 10;
+    const vertebraePoints = [];
+    for (let i = 0; i <= numVertebrae; i++) {
+      const t = i / numVertebrae;
+      const vx = neckBase.x + (pelvicCenter.x - neckBase.x) * t;
+      const vy = neckBase.y + (pelvicCenter.y - neckBase.y) * t;
+      vertebraePoints.push({ x: vx, y: vy });
+
+      ctx.beginPath();
+      ctx.arc(vx, vy, t === 0 || t === 1 ? 4 : 3, 0, 2 * Math.PI);
+      ctx.fillStyle = '#ffffff';
+      ctx.fill();
+      ctx.strokeStyle = '#00f3ff';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+
+    // Main Spine Channel Line
+    ctx.beginPath();
+    ctx.moveTo(neckBase.x, neckBase.y);
+    ctx.lineTo(pelvicCenter.x, pelvicCenter.y);
+    ctx.strokeStyle = 'rgba(0, 243, 255, 0.9)';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+
+    // Anatomical Ribcage (4 Curved Rib Pairs wrapping thoracic chest)
+    const thoraxCenter = vertebraePoints[3];
+    const ribWidth = shoulderWidth * 0.42;
+    for (let r = 1; r <= 4; r++) {
+      const vert = vertebraePoints[r + 1];
+      const ribDrop = r * 8;
+      const ribW = ribWidth * (1 - r * 0.12);
+
+      // Left Rib Arc
+      ctx.beginPath();
+      ctx.moveTo(vert.x, vert.y);
+      ctx.bezierCurveTo(vert.x - ribW, vert.y + ribDrop * 0.3, vert.x - ribW * 0.9, vert.y + ribDrop, thoraxCenter.x - ribW * 0.3, vert.y + ribDrop * 1.1);
+      ctx.strokeStyle = 'rgba(0, 229, 255, 0.65)';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      // Right Rib Arc
+      ctx.beginPath();
+      ctx.moveTo(vert.x, vert.y);
+      ctx.bezierCurveTo(vert.x + ribW, vert.y + ribDrop * 0.3, vert.x + ribW * 0.9, vert.y + ribDrop, thoraxCenter.x + ribW * 0.3, vert.y + ribDrop * 1.1);
+      ctx.strokeStyle = 'rgba(0, 229, 255, 0.65)';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+
+    // Clavicles (Collarbones)
+    if (lShoulder) {
+      ctx.beginPath();
+      ctx.moveTo(neckBase.x, neckBase.y);
+      ctx.quadraticCurveTo((neckBase.x + lShoulder.x) / 2, neckBase.y - 4, lShoulder.x, lShoulder.y);
+      ctx.strokeStyle = '#00f3ff';
+      ctx.lineWidth = 2.8;
+      ctx.stroke();
+    }
+    if (rShoulder) {
+      ctx.beginPath();
+      ctx.moveTo(neckBase.x, neckBase.y);
+      ctx.quadraticCurveTo((neckBase.x + rShoulder.x) / 2, neckBase.y - 4, rShoulder.x, rShoulder.y);
+      ctx.strokeStyle = '#00f3ff';
+      ctx.lineWidth = 2.8;
+      ctx.stroke();
+    }
+
+    // Pelvic Girdle & Iliac Arcs
+    if (lHip && rHip) {
+      ctx.beginPath();
+      ctx.moveTo(lHip.x, lHip.y);
+      ctx.bezierCurveTo(lHip.x, lHip.y - spineLength * 0.12, pelvicCenter.x - shoulderWidth * 0.25, vertebraePoints[8].y, pelvicCenter.x, vertebraePoints[8].y);
+      ctx.bezierCurveTo(pelvicCenter.x + shoulderWidth * 0.25, vertebraePoints[8].y, rHip.x, rHip.y - spineLength * 0.12, rHip.x, rHip.y);
+      ctx.lineTo(pelvicCenter.x, pelvicCenter.y);
+      ctx.closePath();
+      ctx.strokeStyle = 'rgba(0, 243, 255, 0.85)';
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(0, 162, 255, 0.07)';
+      ctx.fill();
+    }
+  }
+
+  // 3. ANATOMICAL BONES & ARTICULATED LIMBS
+  const bones = [
+    [lShoulder, lElbow],
+    [lElbow, lWrist],
+    [rShoulder, rElbow],
+    [rElbow, rWrist],
+    [lHip, lKnee],
+    [lKnee, lAnkle],
+    [rHip, rKnee],
+    [rKnee, rAnkle]
+  ];
+
+  bones.forEach(([p1, p2]) => {
+    if (p1 && p2) {
+      ctx.beginPath();
+      ctx.moveTo(p1.x, p1.y);
+      ctx.lineTo(p2.x, p2.y);
+      ctx.strokeStyle = 'rgba(0, 243, 255, 0.85)';
+      ctx.lineWidth = 4.5;
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.moveTo(p1.x, p1.y);
+      ctx.lineTo(p2.x, p2.y);
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+  });
+
+  // 4. ARTICULATED GLOWING JOINT CAPSULES
+  const majorJoints = [lShoulder, rShoulder, lElbow, rElbow, lWrist, rWrist, lHip, rHip, lKnee, rKnee, lAnkle, rAnkle];
+  majorJoints.forEach(joint => {
+    if (joint) {
+      ctx.beginPath();
+      ctx.arc(joint.x, joint.y, 7, 0, 2 * Math.PI);
+      ctx.strokeStyle = '#00f3ff';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(0, 243, 255, 0.25)';
+      ctx.fill();
+
+      ctx.beginPath();
+      ctx.arc(joint.x, joint.y, 3, 0, 2 * Math.PI);
+      ctx.fillStyle = '#ffffff';
+      ctx.fill();
+    }
+  });
+
+  ctx.restore();
+}
+
+// ----------------------------------------------------------------------
+// MAIN LOOP
+// ----------------------------------------------------------------------
+async function detectLoop(){
+  if(!running) return;
+  const t0 = performance.now();
+
+  const rawObjects = await objectModel.detect(video);
+  const [poses, faces] = await Promise.all([
+    poseModel.estimatePoses(video),
+    faceModel ? faceModel.estimateFaces(video, {flipHorizontal:false}) : Promise.resolve([])
+  ]);
+
+  ctx.clearRect(0,0,overlay.width, overlay.height);
+
+  // ---- filter low-confidence detections up front (cuts flicker/false triggers) ----
+  const objects = rawObjects.filter(o => o.score >= OBJECT_MIN_SCORE);
+  updateTrackedObject(objects);
+  drawTargets();
+
+  // ---- collect + draw non-person objects ----
+  let personCountRaw = 0;
+  const liveBoxes = {}; // class -> bbox, this frame only
+  objects.forEach(o => {
+    if(o.class === 'person'){ personCountRaw++; return; }
+    if(TASKS[o.class] && !liveBoxes[o.class]) liveBoxes[o.class] = o.bbox;
+
+    const isTarget = (o.class === currentTaskClass);
+    const color = isTarget ? TARGET_COLOR : OBJECT_COLOR;
+    const [x,y,w,h] = o.bbox;
+    const displayBox = boxToOverlay(o.bbox);
+    ctx.strokeStyle = color; ctx.lineWidth = isTarget ? 3 : 2;
+    ctx.strokeRect(displayBox[0], displayBox[1], displayBox[2], displayBox[3]);
+    ctx.fillStyle = color; ctx.font = '13px monospace';
+    ctx.save(); ctx.translate(overlay.width, 0); ctx.scale(-1,1);
+    const trackText = trackedObject && o.class === trackedObject.class ? ` ID #${String(trackedObject.id).padStart(2, '0')}` : '';
+    ctx.fillText(`${o.class}${trackText}${isTarget?' (TASK)':''} ${(o.score*100).toFixed(0)}%`, displayBox[0], displayBox[1]>14? displayBox[1]-6 : displayBox[1]+14);
+    ctx.restore();
+  });
+  if(trackedObject && !trackedObject.lastSeen){
+    const predictedBox = boxToOverlay(trackedObject.bbox);
+    ctx.save();
+    ctx.strokeStyle = 'rgba(91,140,255,.8)'; ctx.lineWidth = 2; ctx.setLineDash([5, 4]);
+    ctx.strokeRect(predictedBox[0], predictedBox[1], predictedBox[2], predictedBox[3]);
+    ctx.setLineDash([]); ctx.font = '11px monospace'; ctx.fillStyle = PERSON_COLOR;
+    ctx.fillText(`${trackedObject.class} ID #${String(trackedObject.id).padStart(2, '0')} TRACKING`, predictedBox[0], Math.max(12, predictedBox[1] - 5));
+    ctx.restore();
+  }
+
+  // ---- update object memory (lets us survive brief occlusion, e.g. object hidden behind a hand) ----
+  const nowMs = Date.now();
+  Object.keys(liveBoxes).forEach(cls => { objectMemory[cls] = {bbox: liveBoxes[cls], lastSeen: nowMs}; });
+  function getTrackedBox(cls){
+    if(liveBoxes[cls]) return {bbox: liveBoxes[cls], live: true};
+    const mem = objectMemory[cls];
+    if(mem && (nowMs - mem.lastSeen) < OCCLUSION_GRACE_MS) return {bbox: mem.bbox, live: false};
+    return null;
+  }
+
+  // ---- pose: smooth keypoints, derive person box from skeleton (more accurate than coco-ssd's box) ----
+  const pose = poses[0]; // single-pose model — primary/most prominent person
+  let wrists = [];
+  let wristThreshold = WRIST_DIST_BASE;
+
+  if(pose){
+    const raw = pose.keypoints;
+    if(!smoothedKeypoints || smoothedKeypoints.length !== raw.length){
+      smoothedKeypoints = raw.map(k => ({x:k.x, y:k.y, score:k.score}));
+    }
+    const kps = raw.map((k, i) => {
+      const prev = smoothedKeypoints[i];
+      if(k.score < KEYPOINT_MIN_SCORE) return {x:prev.x, y:prev.y, score:k.score};
+      const dist = Math.hypot(k.x - prev.x, k.y - prev.y);
+      let a = KEYPOINT_SMOOTHING;
+      if(dist > 25) a = 0.2;
+      else if(dist > 10) a = 0.4;
+      return {x: prev.x*a + k.x*(1-a), y: prev.y*a + k.y*(1-a), score:k.score};
+    });
+    smoothedKeypoints = kps;
+    const displayKps = mapKeypoints(kps);
+    updateHandFallback(kps);
+
+    // Person bounding box derived from keypoints
+    const valid = kps.filter(k => k.score > KEYPOINT_MIN_SCORE);
+    if(valid.length >= 4){
+      let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+      valid.forEach(k=>{ minX=Math.min(minX,k.x); minY=Math.min(minY,k.y); maxX=Math.max(maxX,k.x); maxY=Math.max(maxY,k.y); });
+      const padX = (maxX-minX)*0.15 + 10, padY = (maxY-minY)*0.15 + 10;
+      ctx.strokeStyle = PERSON_COLOR; ctx.lineWidth = 1.8;
+      ctx.setLineDash([4, 4]);
+      const displayBox = boxToOverlay([minX-padX, minY-padY, (maxX-minX)+2*padX, (maxY-minY)+2*padY]);
+      ctx.strokeRect(displayBox[0], displayBox[1], displayBox[2], displayBox[3]);
+      ctx.setLineDash([]);
+    }
+
+    // DRAW HIGH-PRECISION ANATOMICAL SKELETON (X-Ray Glowing Hologram)
+    drawReferenceBody(displayKps, ctx, isBlazePose);
+
+    // Extract Wrist Coordinates for object proximity calculation
+    const wristIndices = isBlazePose ? [15, 16] : [9, 10];
+    wristIndices.forEach(idx => {
+      const k = kps[idx];
+      if(k && k.score > KEYPOINT_MIN_SCORE) wrists.push([k.x, k.y]);
+    });
+
+    // Adaptive wrist threshold based on shoulder/hip scale
+    const lsIdx = isBlazePose ? 11 : 5, rsIdx = isBlazePose ? 12 : 6;
+    const lhIdx = isBlazePose ? 23 : 11, rhIdx = isBlazePose ? 24 : 12;
+    const ls=kps[lsIdx], rs=kps[rsIdx], lh=kps[lhIdx], rh=kps[rhIdx];
+    let refDist = null;
+    if(ls&&rs&&ls.score>KEYPOINT_MIN_SCORE&&rs.score>KEYPOINT_MIN_SCORE) refDist = Math.hypot(ls.x-rs.x, ls.y-rs.y);
+    else if(lh&&rh&&lh.score>KEYPOINT_MIN_SCORE&&rh.score>KEYPOINT_MIN_SCORE) refDist = Math.hypot(lh.x-rh.x, lh.y-rh.y);
+    if(refDist) wristThreshold = Math.max(35, Math.min(160, WRIST_DIST_BASE * (refDist / 150)));
+  } else {
+    smoothedKeypoints = null;
+    smoothedFaceKeypoints = null;
+  }
+
+  drawFaceLandmarks(faces[0], ctx);
+
+  // ---- multi-person count (coco-ssd instance count; skeleton is drawn for the primary pose only) ----
+  if(personCountRaw === personCandidateValue){
+    personCandidateFrames++;
+  } else {
+    personCandidateValue = personCountRaw;
+    personCandidateFrames = 1;
+  }
+  if(personCandidateFrames === PERSON_CONFIRM_FRAMES && personCandidateValue !== personConfirmed){
+    if(personCandidateValue > personConfirmed){
+      const msg = personCandidateValue === 1 ? 'Person detected' : 'Another person detected';
+      addLog('info', msg + ` (${personCandidateValue} in frame)`);
+      speak(msg);
+    } else if(personCandidateValue === 0 && personConfirmed > 0){
+      addLog('info', 'Frame is now empty — no person detected.');
+    }
+    personConfirmed = personCandidateValue;
+  }
+  document.getElementById('statPersonCount').textContent = personCountRaw;
+
+  function nearestWristDist(bbox){
+    if(!bbox || wrists.length === 0) return Infinity;
+    return Math.min(...wrists.map(([wx,wy]) => pointToBoxDistance(wx, wy, bbox)));
+  }
+
+  // ---- STRICT TARGET ROUTE ----
+  validateTargetMovement();
+
+  const dt = performance.now() - t0;
+  fpsLabel.textContent = (1000/Math.max(dt, 33)).toFixed(1) + ' fps';
+
+  rafId = requestAnimationFrame(detectLoop);
+}
+</script>
+</body>
+</html>
